@@ -3,14 +3,12 @@ import { join, resolve } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { SchedulerEngine } from './scheduler/engine'
-import { ScheduleStore } from './scheduler/schedule-store'
+import { AgentConfigStore } from './scheduler/agent-config-store'
 import { RunsStore } from './scheduler/runs-store'
-import { defaultDataPaths, migrateLegacyStateIfNeeded } from './scheduler/migrate'
-import { broadcastChange, broadcastTheme, registerIpc } from './ipc'
-import { ThemeWatcher } from './theme/loader'
+import { broadcastChange, registerIpc } from './ipc'
+import { createThemeStore } from './theme/loader'
 
 let engine: SchedulerEngine | null = null
-let themeWatcher: ThemeWatcher | null = null
 
 function getResourcesDir(): string {
   if (is.dev) {
@@ -61,18 +59,13 @@ app.whenReady().then(async () => {
 
   const userData = app.getPath('userData')
   const dataDir = join(userData, 'data')
-  const agentsDir = join(userData, 'agents')
+  const agentsDir = join(dataDir, 'agents')
   const resourcesDir = getResourcesDir()
-  const paths = defaultDataPaths(dataDir)
-  const migrated = await migrateLegacyStateIfNeeded(paths)
-  if (migrated) {
-    console.log('[migrate] split legacy state.json into schedules.json + runs.jsonl')
-  }
 
-  const schedules = new ScheduleStore(paths.schedules, paths.state)
-  const runs = new RunsStore(paths.runsDir, paths.runs)
+  const configs = new AgentConfigStore(join(dataDir, 'agents.json'))
+  const runs = new RunsStore(join(dataDir, 'runs'))
   engine = new SchedulerEngine({
-    schedules,
+    configs,
     runs,
     dataDir,
     agentsDir,
@@ -81,10 +74,9 @@ app.whenReady().then(async () => {
   })
   await engine.start()
 
-  themeWatcher = new ThemeWatcher()
-  themeWatcher.start((theme) => broadcastTheme(theme))
+  const themeStore = createThemeStore(join(dataDir, 'theme.json'))
 
-  registerIpc(engine, agentsDir)
+  registerIpc(engine, agentsDir, themeStore)
 
   createWindow()
 
@@ -95,7 +87,6 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   engine?.stop()
-  themeWatcher?.stop()
   if (process.platform !== 'darwin') {
     app.quit()
   }

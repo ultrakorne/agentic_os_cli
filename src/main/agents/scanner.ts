@@ -1,39 +1,66 @@
 import { promises as fs, constants as fsc } from 'fs'
 import { basename, extname, join } from 'path'
-import type { Agent } from '../scheduler/types'
 
-// Agents are shell scripts. Non-shell tools (Python, Node, Ruby, …) belong
-// behind a one-line bash shim — the explicit contract is clearer than a
-// magical "any executable" rule, and matches what users see when they run
-// `crontab -l` or read the agents/ folder by hand.
 const SUPPORTED_EXTS = new Set(['.sh', '.bash', '.zsh', ''])
+const DEFAULT_SECTION = 'Agents'
 
-export type AgentMetaFile = {
-  title?: string
-  description?: string
-  section?: string
+export type ScriptInfo = {
+  id: string
+  scriptPath: string
+  section: string
 }
 
-export async function scanAgents(agentsDir: string): Promise<Agent[]> {
+/**
+ * Walks <userData>/agents/. Top-level scripts get section "Agents"; scripts
+ * inside a first-level subdirectory adopt that directory's name as their
+ * section. Deeper nesting is ignored. IDs (filename minus extension) must
+ * be unique across the whole tree — duplicates are dropped with a console
+ * warning so the dashboard never shows two agents with the same id.
+ */
+export async function scanScripts(agentsDir: string): Promise<ScriptInfo[]> {
   await fs.mkdir(agentsDir, { recursive: true })
-  let entries: string[]
+  const out: ScriptInfo[] = []
+  const seen = new Map<string, string>() // id -> first scriptPath we saw
+
+  await collectInto(agentsDir, DEFAULT_SECTION, out, seen)
+
+  let entries: import('fs').Dirent[]
   try {
-    entries = await fs.readdir(agentsDir)
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
-    throw err
+    entries = await fs.readdir(agentsDir, { withFileTypes: true })
+  } catch {
+    entries = []
+  }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue
+    if (e.name.startsWith('.')) continue
+    await collectInto(join(agentsDir, e.name), e.name, out, seen)
   }
 
-  const out: Agent[] = []
+  out.sort((a, b) => a.id.localeCompare(b.id))
+  return out
+}
+
+async function collectInto(
+  dir: string,
+  section: string,
+  out: ScriptInfo[],
+  seen: Map<string, string>
+): Promise<void> {
+  let entries: string[]
+  try {
+    entries = await fs.readdir(dir)
+  } catch {
+    return
+  }
   for (const name of entries) {
     if (name.startsWith('.')) continue
-    if (name.endsWith('.meta.json')) continue
     if (name.toLowerCase() === 'readme.md') continue
+    if (name.endsWith('.meta.json')) continue
 
     const ext = extname(name)
     if (!SUPPORTED_EXTS.has(ext)) continue
 
-    const fullPath = join(agentsDir, name)
+    const fullPath = join(dir, name)
     let stat: import('fs').Stats
     try {
       stat = await fs.stat(fullPath)
@@ -41,23 +68,19 @@ export async function scanAgents(agentsDir: string): Promise<Agent[]> {
       continue
     }
     if (!stat.isFile()) continue
-
     if (!(await isExecutable(fullPath))) continue
 
     const id = basename(name, ext)
-    const meta = await readMeta(join(agentsDir, `${id}.meta.json`))
-
-    out.push({
-      id,
-      title: meta?.title ?? humanize(id),
-      description: meta?.description ?? '',
-      section: meta?.section ?? 'Agents',
-      scriptPath: fullPath
-    })
+    const previous = seen.get(id)
+    if (previous) {
+      console.warn(
+        `[scanner] duplicate agent id "${id}" — keeping ${previous}, ignoring ${fullPath}`
+      )
+      continue
+    }
+    seen.set(id, fullPath)
+    out.push({ id, scriptPath: fullPath, section })
   }
-
-  out.sort((a, b) => a.id.localeCompare(b.id))
-  return out
 }
 
 async function isExecutable(path: string): Promise<boolean> {
@@ -67,23 +90,6 @@ async function isExecutable(path: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-async function readMeta(path: string): Promise<AgentMetaFile | null> {
-  try {
-    const txt = await fs.readFile(path, 'utf8')
-    const parsed = JSON.parse(txt) as AgentMetaFile
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function humanize(id: string): string {
-  return id
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim()
 }
 
 export async function ensureAgentsDir(agentsDir: string, seedFrom: string): Promise<void> {

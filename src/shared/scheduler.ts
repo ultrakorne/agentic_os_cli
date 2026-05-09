@@ -4,11 +4,11 @@ export type ScheduleSpec =
   | { kind: 'hourly'; everyHours: number; minute: number }
   | { kind: 'daily'; days: Weekday[]; hour: number; minute: number }
 
-export type Schedule = {
+export type AgentConfig = {
   id: string
-  jobId: string
-  spec: ScheduleSpec
-  orphaned?: boolean
+  schedule?: ScheduleSpec
+  title?: string
+  description?: string
 }
 
 export type JobRunTrigger = 'schedule' | 'manual' | 'catch-up'
@@ -34,11 +34,13 @@ export type Agent = {
   description: string
   section: string
   scriptPath?: string
+  schedule?: ScheduleSpec
+  scheduled: boolean
+  orphaned: boolean
 }
 
 export type MissedRun = {
-  scheduleId: string
-  jobId: string
+  agentId: string
   expectedAt: string
 }
 

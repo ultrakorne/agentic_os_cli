@@ -7,7 +7,7 @@ import { SystemBanner } from './SystemBanner'
 import { MissedRunsBanner } from './MissedRunsBanner'
 
 export function Dashboard(): JSX.Element {
-  const { agents, schedules, schedulesById, runs, missed, loading } = useApp()
+  const { agents, runs, missed, loading } = useApp()
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const grouped = useMemo(() => {
@@ -31,16 +31,13 @@ export function Dashboard(): JSX.Element {
     return m
   }, [runs])
 
-  const missedByJob = useMemo(() => {
+  const missedByAgent = useMemo(() => {
     const m = new Map<string, number>()
-    for (const x of missed) m.set(x.jobId, (m.get(x.jobId) ?? 0) + 1)
+    for (const x of missed) m.set(x.agentId, (m.get(x.agentId) ?? 0) + 1)
     return m
   }, [missed])
 
-  const orphanSchedules = useMemo(
-    () => [...schedulesById.values()].filter((s) => s.orphaned),
-    [schedulesById]
-  )
+  const orphanCount = useMemo(() => agents.filter((a) => a.orphaned).length, [agents])
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedId) ?? null,
@@ -58,14 +55,14 @@ export function Dashboard(): JSX.Element {
   return (
     <main className="relative z-[1] flex-1 overflow-y-auto">
       <div className="mx-auto max-w-6xl space-y-10 px-6 py-8">
-        <SystemBanner orphanCount={orphanSchedules.length} />
+        <SystemBanner orphanCount={orphanCount} />
         <MissedRunsBanner />
 
         {agents.length === 0 ? (
           <EmptyAgents />
         ) : (
           grouped.map((g) => {
-            const scheduledCount = g.items.filter((a) => schedules.has(a.id)).length
+            const scheduledCount = g.items.filter((a) => a.scheduled).length
             return (
               <Section
                 key={g.name}
@@ -78,9 +75,8 @@ export function Dashboard(): JSX.Element {
                     <AgentCard
                       key={agent.id}
                       agent={agent}
-                      schedule={schedules.get(agent.id)}
                       recentRun={lastRunByJob.get(agent.id)}
-                      missedCount={missedByJob.get(agent.id) ?? 0}
+                      missedCount={missedByAgent.get(agent.id) ?? 0}
                       selected={selectedId === agent.id}
                       onSelect={() =>
                         setSelectedId((cur) => (cur === agent.id ? null : agent.id))
@@ -98,7 +94,6 @@ export function Dashboard(): JSX.Element {
         <EditorOverlay onClose={() => setSelectedId(null)}>
           <ScheduleEditor
             agent={selectedAgent}
-            current={schedules.get(selectedAgent.id)}
             onClose={() => setSelectedId(null)}
           />
         </EditorOverlay>

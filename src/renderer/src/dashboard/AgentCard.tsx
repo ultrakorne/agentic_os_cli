@@ -1,10 +1,9 @@
 import { useEffect, useState, type CSSProperties, type JSX } from 'react'
-import type { Agent, JobRun, Schedule } from '@shared/scheduler'
+import type { Agent, JobRun } from '@shared/scheduler'
 import { describeSchedule, relativeFromNow } from '../lib/format'
 
 type Props = {
   agent: Agent
-  schedule: Schedule | undefined
   recentRun: JobRun | undefined
   missedCount: number
   selected: boolean
@@ -15,12 +14,12 @@ type Status = JobRun['status'] | undefined
 
 export function AgentCard({
   agent,
-  schedule,
   recentRun,
   missedCount,
   selected,
   onSelect
 }: Props): JSX.Element {
+  const schedule = agent.schedule
   const [running, setRunning] = useState(false)
   const [nextRunIso, setNextRunIso] = useState<string | null>(null)
   const [launchError, setLaunchError] = useState<string | null>(null)
@@ -31,7 +30,7 @@ export function AgentCard({
       setNextRunIso(null)
       return
     }
-    void window.api.scheduler.nextRun(schedule.spec).then((iso) => {
+    void window.api.scheduler.nextRun(schedule).then((iso) => {
       if (!cancelled) setNextRunIso(iso)
     })
     return () => {

@@ -1,56 +1,40 @@
 import { create } from 'zustand'
-import type { Agent, CrontabStatus, JobRun, MissedRun, Schedule } from '@shared/scheduler'
-import type { Theme } from '@shared/theme'
+import type { Agent, CrontabStatus, JobRun, MissedRun } from '@shared/scheduler'
+import type { Theme, ThemeSummary } from '@shared/theme'
 import { applyTheme } from './theme'
 
 type AppState = {
   agents: Agent[]
-  schedules: Map<string, Schedule>
-  schedulesById: Map<string, Schedule>
   runs: JobRun[]
   missed: MissedRun[]
   crontabStatus: CrontabStatus | null
   theme: Theme | null
+  themes: ThemeSummary[]
   loading: boolean
   refresh: () => Promise<void>
   rescanAgents: () => Promise<void>
   reconcileCrontab: () => Promise<void>
+  setTheme: (id: string) => Promise<void>
   init: () => () => void
 }
 
 export const useApp = create<AppState>((set, get) => ({
   agents: [],
-  schedules: new Map(),
-  schedulesById: new Map(),
   runs: [],
   missed: [],
   crontabStatus: null,
   theme: null,
+  themes: [],
   loading: true,
 
   refresh: async () => {
-    const [agents, schedules, runs, missed, crontabStatus] = await Promise.all([
+    const [agents, runs, missed, crontabStatus] = await Promise.all([
       window.api.agents.list(),
-      window.api.scheduler.listSchedules(),
       window.api.scheduler.listRuns(),
       window.api.scheduler.listMissed(),
       window.api.scheduler.crontabStatus()
     ])
-    const byJob = new Map<string, Schedule>()
-    const byId = new Map<string, Schedule>()
-    for (const s of schedules) {
-      byJob.set(s.jobId, s)
-      byId.set(s.id, s)
-    }
-    set({
-      agents,
-      schedules: byJob,
-      schedulesById: byId,
-      runs,
-      missed,
-      crontabStatus,
-      loading: false
-    })
+    set({ agents, runs, missed, crontabStatus, loading: false })
   },
 
   rescanAgents: async () => {
@@ -61,11 +45,18 @@ export const useApp = create<AppState>((set, get) => ({
     await window.api.scheduler.reconcileCrontab()
   },
 
+  setTheme: async (id: string) => {
+    const theme = await window.api.theme.set(id)
+    applyTheme(theme)
+    set({ theme })
+  },
+
   init: () => {
     void window.api.theme.get().then((theme) => {
       applyTheme(theme)
       set({ theme })
     })
+    void window.api.theme.list().then((themes) => set({ themes }))
     const offTheme = window.api.theme.onChange((theme) => {
       applyTheme(theme)
       set({ theme })

@@ -1,7 +1,29 @@
 # agents/
 
-Each shell script in this directory is an agent. The filename (without
-extension) is the agent's id and matches the `jobId` referenced by schedules.
+Each shell script in this directory (or a first-level subdirectory) is an
+agent. The filename without extension is the agent's id.
+
+## Sections from folders
+
+The dashboard groups agents into sections. The section is determined by
+the script's parent directory:
+
+```
+agents/
+  ping.sh                       → id="ping",       section="Agents"
+  Daily/
+    morning-digest.sh           → id="morning-digest", section="Daily"
+  Engineering/
+    pr-watch.sh                 → id="pr-watch",   section="Engineering"
+```
+
+`mv` files between folders to reorganize. IDs must be unique across the
+whole tree — two scripts named `ping.sh` in different subfolders is a
+collision; the dashboard keeps the first one it walks (top level wins
+over subfolders, then subfolders alphabetically) and warns about the
+duplicate in the main-process log.
+
+Deeper nesting (`agents/Daily/sub/foo.sh`) is ignored.
 
 ## Contract
 
@@ -39,21 +61,30 @@ language explicit when you `cat agents/<id>` or read `crontab -l`.
 
 ## Optional metadata
 
-A sibling `<id>.meta.json` file is read by the dashboard:
+Agent display metadata (title, description) and the schedule itself live
+in `<userData>/data/agents.json`, not next to the script:
 
 ```json
 {
-  "title": "Morning digest",
-  "description": "Summarize overnight notifications.",
-  "section": "Daily"
+  "agents": [
+    {
+      "id": "morning-digest",
+      "title": "Morning digest",
+      "description": "Summarize overnight notifications.",
+      "schedule": { "kind": "daily", "days": ["mon","tue","wed","thu","fri"], "hour": 9, "minute": 0 }
+    }
+  ]
 }
 ```
 
-Missing metadata → title is derived from the filename, section defaults to
-"Agents".
+Title and description are optional; missing values are derived from the
+filename. The dashboard rewrites `agents.json` whenever you change a
+schedule. Section comes from the script's parent folder, not from this
+file.
 
 ## Adding an agent
 
-1. Drop an executable script here, e.g. `morning-digest.sh`.
-2. (Optional) write a sibling `morning-digest.meta.json`.
-3. Open the dashboard and create a schedule for it.
+1. Drop an executable script into `agents/` (top level) or
+   `agents/<Section>/`.
+2. Open the dashboard. The agent appears with a default title; create a
+   schedule from the inline editor.

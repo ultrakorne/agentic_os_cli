@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type JSX } from 'react'
-import type { Agent, Schedule, ScheduleSpec, Weekday } from '@shared/scheduler'
+import type { Agent, ScheduleSpec, Weekday } from '@shared/scheduler'
 import { formatClock, relativeFromNow } from '../lib/format'
 
 type Mode = 'hourly' | 'daily'
@@ -16,7 +16,6 @@ const DAYS: { key: Weekday; label: string }[] = [
 
 type Props = {
   agent: Agent
-  current: Schedule | undefined
   onClose: () => void
 }
 
@@ -50,8 +49,8 @@ const frameStyle: CSSProperties = {
   ['--glow' as never]: 'var(--color-hot)'
 }
 
-export function ScheduleEditor({ agent, current, onClose }: Props): JSX.Element {
-  const seed = useMemo(() => initial(current?.spec), [current])
+export function ScheduleEditor({ agent, onClose }: Props): JSX.Element {
+  const seed = useMemo(() => initial(agent.schedule), [agent.schedule])
   const [mode, setMode] = useState<Mode>(seed.mode)
   const [hourly, setHourly] = useState(seed.hourly)
   const [daily, setDaily] = useState(seed.daily)
@@ -92,7 +91,7 @@ export function ScheduleEditor({ agent, current, onClose }: Props): JSX.Element 
     if (!spec) return
     setBusy(true)
     try {
-      await window.api.scheduler.upsert({ id: agent.id, jobId: agent.id, spec })
+      await window.api.agents.setSchedule(agent.id, spec)
       onClose()
     } finally {
       setBusy(false)
@@ -102,7 +101,7 @@ export function ScheduleEditor({ agent, current, onClose }: Props): JSX.Element 
   const clear = async (): Promise<void> => {
     setBusy(true)
     try {
-      await window.api.scheduler.remove(agent.id)
+      await window.api.agents.setSchedule(agent.id, null)
       onClose()
     } finally {
       setBusy(false)
@@ -190,7 +189,7 @@ export function ScheduleEditor({ agent, current, onClose }: Props): JSX.Element 
           cancel
         </ArcadeButton>
 
-        {current && (
+        {agent.schedule && (
           <span className="ml-auto">
             <ArcadeButton tone="danger" onClick={clear} disabled={busy}>
               clear

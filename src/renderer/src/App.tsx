@@ -1,13 +1,15 @@
-import { useEffect, useMemo, type JSX } from 'react'
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import { useApp } from './store'
 import { Dashboard } from './dashboard/Dashboard'
+import type { ThemeSummary } from '@shared/theme'
 
 function App(): JSX.Element {
   const init = useApp((s) => s.init)
   const theme = useApp((s) => s.theme)
+  const themes = useApp((s) => s.themes)
+  const setTheme = useApp((s) => s.setTheme)
   const runs = useApp((s) => s.runs)
   const agents = useApp((s) => s.agents)
-  const schedules = useApp((s) => s.schedules)
 
   useEffect(() => {
     const off = init()
@@ -21,14 +23,20 @@ function App(): JSX.Element {
     const lastSuccess = runs.find((r) => r.status === 'success')
     return {
       running,
-      scheduled: schedules.size,
+      scheduled: agents.filter((a) => a.scheduled).length,
       lastRun: lastSuccess?.endedAt ?? lastSuccess?.startedAt ?? null
     }
-  }, [runs, schedules])
+  }, [runs, agents])
 
   return (
     <div className="flex min-h-screen flex-col">
-      <TopBar themeName={theme?.name ?? '...'} agentCount={agents.length} />
+      <TopBar
+        currentThemeId={theme?.id ?? null}
+        currentThemeName={theme?.name ?? '...'}
+        themes={themes}
+        onPick={(id) => void setTheme(id)}
+        agentCount={agents.length}
+      />
       <Dashboard />
       <BottomBar
         running={stats.running}
@@ -40,10 +48,16 @@ function App(): JSX.Element {
 }
 
 function TopBar({
-  themeName,
+  currentThemeId,
+  currentThemeName,
+  themes,
+  onPick,
   agentCount
 }: {
-  themeName: string
+  currentThemeId: string | null
+  currentThemeName: string
+  themes: ThemeSummary[]
+  onPick: (id: string) => void
   agentCount: number
 }): JSX.Element {
   return (
@@ -77,21 +91,101 @@ function TopBar({
         </span>
       </div>
 
-      <div className="ml-auto flex items-baseline gap-3 text-xs">
-        <span className="uppercase tracking-[0.22em] text-[var(--color-fg-faint)]">
-          theme
-        </span>
-        <button
-          type="button"
-          onClick={() => void window.api.theme.reload()}
-          title="reload theme from omarchy"
-          className="font-display text-xs uppercase text-[var(--color-accent)] transition-colors hover:text-[var(--color-hot)] neon-text-soft"
-          style={{ letterSpacing: '0.22em' }}
-        >
-          {themeName}
-        </button>
+      <div className="ml-auto">
+        <ThemePicker
+          currentThemeId={currentThemeId}
+          currentThemeName={currentThemeName}
+          themes={themes}
+          onPick={onPick}
+        />
       </div>
     </header>
+  )
+}
+
+function ThemePicker({
+  currentThemeId,
+  currentThemeName,
+  themes,
+  onPick
+}: {
+  currentThemeId: string | null
+  currentThemeName: string
+  themes: ThemeSummary[]
+  onPick: (id: string) => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent): void => {
+      if (!containerRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div ref={containerRef} className="relative flex items-baseline gap-3 text-xs">
+      <span className="uppercase tracking-[0.22em] text-[var(--color-fg-faint)]">theme</span>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="change theme"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="font-display text-xs uppercase text-[var(--color-accent)] transition-colors hover:text-[var(--color-hot)] neon-text-soft"
+        style={{ letterSpacing: '0.22em' }}
+      >
+        {currentThemeName}
+      </button>
+      {open ? (
+        <ul
+          role="listbox"
+          className="bg-frame absolute right-0 top-full z-20 mt-2 min-w-[180px] border border-[var(--color-rule-bright)] py-1 shadow-[0_8px_30px_-8px_rgba(0,0,0,0.6)]"
+        >
+          {themes.map((t) => {
+            const active = t.id === currentThemeId
+            return (
+              <li key={t.id} role="option" aria-selected={active}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onPick(t.id)
+                    setOpen(false)
+                  }}
+                  className={`flex w-full items-baseline gap-3 px-3 py-1.5 text-left text-xs transition-colors ${
+                    active
+                      ? 'text-[var(--color-hot)] neon-text-soft'
+                      : 'text-[var(--color-fg-dim)] hover:text-[var(--color-accent)]'
+                  }`}
+                >
+                  <span
+                    className="font-display uppercase"
+                    style={{ letterSpacing: '0.22em' }}
+                  >
+                    {t.name}
+                  </span>
+                  {active ? (
+                    <span className="ml-auto text-[10px] tracking-[0.22em] text-[var(--color-fg-faint)]">
+                      active
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : null}
+    </div>
   )
 }
 

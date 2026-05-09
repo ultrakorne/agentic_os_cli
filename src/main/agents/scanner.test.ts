@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { scanAgents } from './scanner'
+import { scanScripts } from './scanner'
 
 let dir: string
 
@@ -14,49 +14,105 @@ afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true })
 })
 
-async function makeExec(name: string): Promise<void> {
-  const path = join(dir, name)
+async function makeExec(path: string): Promise<void> {
+  await fs.mkdir(join(path, '..'), { recursive: true })
   await fs.writeFile(path, '#!/usr/bin/env bash\necho hi\n')
   await fs.chmod(path, 0o755)
 }
 
-describe('scanAgents — extension policy', () => {
+describe('scanScripts — extension policy', () => {
   it('lists shell extensions and shebanged files with no extension', async () => {
-    await makeExec('a.sh')
-    await makeExec('b.bash')
-    await makeExec('c.zsh')
-    await makeExec('d') // no extension
-    const agents = await scanAgents(dir)
-    expect(agents.map((a) => a.id).sort()).toEqual(['a', 'b', 'c', 'd'])
+    await makeExec(join(dir, 'a.sh'))
+    await makeExec(join(dir, 'b.bash'))
+    await makeExec(join(dir, 'c.zsh'))
+    await makeExec(join(dir, 'd')) // no extension
+    const scripts = await scanScripts(dir)
+    expect(scripts.map((s) => s.id).sort()).toEqual(['a', 'b', 'c', 'd'])
   })
 
   it('does not list non-shell extensions even when executable', async () => {
-    await makeExec('shell.sh')
-    await makeExec('script.py')
-    await makeExec('thing.rb')
-    await makeExec('app.js')
-    await makeExec('app.mjs')
-    await makeExec('app.ts')
-    const agents = await scanAgents(dir)
-    expect(agents.map((a) => a.id)).toEqual(['shell'])
+    await makeExec(join(dir, 'shell.sh'))
+    await makeExec(join(dir, 'script.py'))
+    await makeExec(join(dir, 'thing.rb'))
+    await makeExec(join(dir, 'app.js'))
+    await makeExec(join(dir, 'app.mjs'))
+    await makeExec(join(dir, 'app.ts'))
+    const scripts = await scanScripts(dir)
+    expect(scripts.map((s) => s.id)).toEqual(['shell'])
   })
 
   it('skips files without the executable bit', async () => {
     const path = join(dir, 'no-exec.sh')
     await fs.writeFile(path, '#!/usr/bin/env bash\necho hi\n')
-    // explicitly NOT chmod-ing +x
-    const agents = await scanAgents(dir)
-    expect(agents).toEqual([])
+    const scripts = await scanScripts(dir)
+    expect(scripts).toEqual([])
   })
 
   it('skips dotfiles, README, and *.meta.json siblings', async () => {
-    await makeExec('foo.sh')
-    await fs.writeFile(join(dir, '.hidden.sh'), '#!/usr/bin/env bash\n')
-    await fs.chmod(join(dir, '.hidden.sh'), 0o755)
+    await makeExec(join(dir, 'foo.sh'))
+    await makeExec(join(dir, '.hidden.sh'))
     await fs.writeFile(join(dir, 'README.md'), '# notes')
     await fs.writeFile(join(dir, 'foo.meta.json'), '{"title":"Foo"}')
-    const agents = await scanAgents(dir)
-    expect(agents.map((a) => a.id)).toEqual(['foo'])
-    expect(agents[0].title).toBe('Foo')
+    const scripts = await scanScripts(dir)
+    expect(scripts.map((s) => s.id)).toEqual(['foo'])
+  })
+})
+
+describe('scanScripts — section from folder structure', () => {
+  it('top-level scripts default to section "Agents"', async () => {
+    await makeExec(join(dir, 'top.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts).toEqual([
+      { id: 'top', scriptPath: join(dir, 'top.sh'), section: 'Agents' }
+    ])
+  })
+
+  it('first-level subfolder name becomes the section', async () => {
+    await makeExec(join(dir, 'Daily', 'morning.sh'))
+    await makeExec(join(dir, 'Engineering', 'pr-watch.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts.map((s) => `${s.id}:${s.section}`).sort()).toEqual([
+      'morning:Daily',
+      'pr-watch:Engineering'
+    ])
+  })
+
+  it('mixes top-level and subfolder agents', async () => {
+    await makeExec(join(dir, 'misc.sh'))
+    await makeExec(join(dir, 'Daily', 'morning.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts.map((s) => `${s.id}:${s.section}`).sort()).toEqual([
+      'misc:Agents',
+      'morning:Daily'
+    ])
+  })
+
+  it('drops duplicates across folders (first wins, by directory walk order)', async () => {
+    await makeExec(join(dir, 'Daily', 'ping.sh'))
+    await makeExec(join(dir, 'Engineering', 'ping.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts).toHaveLength(1)
+    // top-level gets walked first, then subfolders alphabetically — Daily before Engineering
+    expect(scripts[0].section).toBe('Daily')
+  })
+
+  it('top-level wins over a subfolder of the same id', async () => {
+    await makeExec(join(dir, 'ping.sh'))
+    await makeExec(join(dir, 'Daily', 'ping.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts).toHaveLength(1)
+    expect(scripts[0].section).toBe('Agents')
+  })
+
+  it('ignores nested subfolders deeper than one level', async () => {
+    await makeExec(join(dir, 'Daily', 'sub', 'too-deep.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts).toEqual([])
+  })
+
+  it('ignores hidden subfolders (dot-prefixed)', async () => {
+    await makeExec(join(dir, '.hidden', 'sneaky.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts).toEqual([])
   })
 })

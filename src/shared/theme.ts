@@ -1,8 +1,10 @@
 export type Theme = {
+  id: string
   name: string
   colors: ThemeColors
-  source: 'omarchy' | 'fallback'
 }
+
+export type ThemeDef = Theme
 
 export type ThemeColors = {
   bg: string
@@ -27,4 +29,9 @@ export type ThemeColors = {
   color13: string
   color14: string
   color15: string
+}
+
+export type ThemeSummary = {
+  id: string
+  name: string
 }

@@ -1,5 +1,5 @@
 import { spawn } from 'child_process'
-import type { Schedule } from './types'
+import type { ScheduleSpec } from './types'
 import { compileToCron } from './spec'
 
 export const BEGIN_MARKER = '# BEGIN agentic_os (managed - do not edit)'
@@ -14,8 +14,9 @@ export type ManagedExtract = {
 }
 
 export type CrontabEntry = {
-  schedule: Schedule
+  agentId: string
   scriptPath: string
+  spec: ScheduleSpec
 }
 
 export type SyncResult = {
@@ -123,17 +124,16 @@ export function buildManagedBlock(
   dataDir: string
 ): string {
   const out: string[] = [BEGIN_MARKER]
-  for (const { schedule, scriptPath } of entries) {
-    if (schedule.orphaned) continue
-    const cron = compileToCron(schedule.spec)
+  for (const entry of entries) {
+    const cron = compileToCron(entry.spec)
     const cmd = [
       shellQuote(wrapperPath),
       shellQuote(dataDir),
-      shellQuote(schedule.id),
-      shellQuote(schedule.jobId),
-      shellQuote(scriptPath)
+      shellQuote(entry.agentId),
+      shellQuote(entry.agentId),
+      shellQuote(entry.scriptPath)
     ].join(' ')
-    out.push(`${cron} ${cmd} # agentic_os:${schedule.id}`)
+    out.push(`${cron} ${cmd} # agentic_os:${entry.agentId}`)
   }
   out.push(END_MARKER)
   return out.join('\n')
@@ -151,7 +151,7 @@ export async function syncCrontab(args: {
     return { wrote: false, conflict: true, reason: 'managed section damaged or duplicated' }
   }
 
-  const liveEntries = args.entries.filter((e) => !e.schedule.orphaned)
+  const liveEntries = args.entries
   const baseText = ex.conflict ? purgeAllManaged(current) : current
   const baseEx = ex.conflict ? extractManaged(baseText) : ex
 

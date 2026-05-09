@@ -4,13 +4,13 @@ import {
   END_MARKER,
   buildManagedBlock,
   extractManaged,
-  purgeAllManaged
+  purgeAllManaged,
+  type CrontabEntry
 } from './crontab'
-import type { Schedule } from './types'
 
-const sched = (id: string, jobId: string): Schedule => ({
-  id,
-  jobId,
+const entry = (agentId: string, scriptPath: string): CrontabEntry => ({
+  agentId,
+  scriptPath,
   spec: { kind: 'hourly', everyHours: 1, minute: 0 }
 })
 
@@ -61,11 +61,11 @@ describe('extractManaged', () => {
 })
 
 describe('buildManagedBlock', () => {
-  it('renders one cron line per non-orphan schedule with shell-quoted args', () => {
+  it('renders one cron line per entry with shell-quoted args', () => {
     const block = buildManagedBlock(
       [
-        { schedule: sched('s1', 'ping'), scriptPath: '/tmp/agents/ping.sh' },
-        { schedule: sched('s2', 'foo'), scriptPath: "/tmp/agents/o'foo.sh" }
+        entry('ping', '/tmp/agents/ping.sh'),
+        entry('foo', "/tmp/agents/o'foo.sh")
       ],
       '/tmp/wrap.sh',
       '/tmp/data'
@@ -76,25 +76,21 @@ describe('buildManagedBlock', () => {
     expect(lines).toHaveLength(4)
     expect(lines[1]).toContain("'/tmp/wrap.sh'")
     expect(lines[1]).toContain("'/tmp/data'")
-    expect(lines[1]).toContain("'s1'")
     expect(lines[1]).toContain("'ping'")
     expect(lines[1]).toContain("'/tmp/agents/ping.sh'")
-    expect(lines[1]).toContain('# agentic_os:s1')
+    expect(lines[1]).toContain('# agentic_os:ping')
     expect(lines[2]).toContain("'/tmp/agents/o'\\''foo.sh'")
   })
 
-  it('skips orphan schedules', () => {
+  it('renders only the entries it is given (caller filters orphans)', () => {
     const block = buildManagedBlock(
-      [
-        { schedule: { ...sched('s1', 'gone'), orphaned: true }, scriptPath: '' },
-        { schedule: sched('s2', 'ping'), scriptPath: '/tmp/ping.sh' }
-      ],
+      [entry('ping', '/tmp/ping.sh')],
       '/wrap.sh',
       '/data'
     )
     const lines = block.split('\n')
     expect(lines).toHaveLength(3)
-    expect(lines[1]).toContain("'s2'")
+    expect(lines[1]).toContain("'ping'")
   })
 
   it('emits an empty managed block (BEGIN/END only) when no entries', () => {

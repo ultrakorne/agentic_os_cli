@@ -2,14 +2,14 @@ import { spawn } from 'child_process'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { Cron } from 'croner'
-import type { ScheduleStore } from './schedule-store'
+import type { AgentConfigStore } from './agent-config-store'
 import type { RunsStore } from './runs-store'
 import type {
   Agent,
+  AgentConfig,
   CrontabStatus,
   JobRun,
   MissedRun,
-  Schedule,
   ScheduleSpec
 } from './types'
 import { compileToCron } from './spec'
@@ -21,12 +21,12 @@ import {
   type SyncResult
 } from './crontab'
 import { detectMissed, missedEqual } from './missed'
-import { scanAgents, ensureAgentsDir } from '../agents/scanner'
+import { scanScripts, ensureAgentsDir, type ScriptInfo } from '../agents/scanner'
 
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
 export type EngineOpts = {
-  schedules: ScheduleStore
+  configs: AgentConfigStore
   runs: RunsStore
   dataDir: string
   agentsDir: string
@@ -38,7 +38,7 @@ const newId = (): string =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 
 export class SchedulerEngine {
-  private agents: Agent[] = []
+  private scripts: ScriptInfo[] = []
   private missed: MissedRun[] = []
   private sweepTimer: NodeJS.Timeout | null = null
   private wrapperOk = false
@@ -54,10 +54,10 @@ export class SchedulerEngine {
   }
 
   async start(): Promise<void> {
-    await Promise.all([this.opts.schedules.load(), this.opts.runs.load()])
+    await Promise.all([this.opts.configs.load(), this.opts.runs.load()])
     await this.installWrapper()
     await ensureAgentsDir(this.opts.agentsDir, join(this.opts.resourcesDir, 'agents'))
-    await this.refreshAgents()
+    await this.refreshScripts()
     this.pythonOk = await detectBin('python3')
     this.crontabOk = await detectBin('crontab')
     if (!this.pythonOk) {
@@ -82,33 +82,55 @@ export class SchedulerEngine {
     this.opts.runs.stopWatching()
   }
 
-  async refreshAgents(): Promise<Agent[]> {
-    this.agents = await scanAgents(this.opts.agentsDir)
-    return this.agents.map((a) => ({ ...a }))
+  async refreshScripts(): Promise<Agent[]> {
+    this.scripts = await scanScripts(this.opts.agentsDir)
+    return this.listAgents()
   }
 
   listAgents(): Agent[] {
-    return this.agents.map((a) => ({ ...a }))
+    const byId = new Map<string, Agent>()
+
+    for (const cfg of this.opts.configs.list()) {
+      byId.set(cfg.id, this.makeAgentFromConfig(cfg))
+    }
+    for (const script of this.scripts) {
+      const existing = byId.get(script.id)
+      if (existing) {
+        existing.scriptPath = script.scriptPath
+        existing.section = script.section
+        existing.orphaned = false
+      } else {
+        byId.set(script.id, {
+          id: script.id,
+          title: humanize(script.id),
+          description: '',
+          section: script.section,
+          scriptPath: script.scriptPath,
+          schedule: undefined,
+          scheduled: false,
+          orphaned: false
+        })
+      }
+    }
+
+    return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
   }
 
-  listSchedules(): Schedule[] {
-    const known = new Set(this.agents.map((a) => a.id))
-    return this.opts.schedules.listSchedules().map((s) => ({
-      ...s,
-      orphaned: !known.has(s.jobId)
-    }))
+  private makeAgentFromConfig(cfg: AgentConfig): Agent {
+    return {
+      id: cfg.id,
+      title: cfg.title ?? humanize(cfg.id),
+      description: cfg.description ?? '',
+      section: 'Agents', // overridden when a matching script is merged in
+      scriptPath: undefined,
+      schedule: cfg.schedule,
+      scheduled: !!cfg.schedule,
+      orphaned: !!cfg.schedule
+    }
   }
 
-  async upsertSchedule(sched: Schedule): Promise<void> {
-    const { orphaned: _orphaned, ...clean } = sched
-    void _orphaned
-    await this.opts.schedules.upsertSchedule(clean as Schedule)
-    await this.runSync()
-    this.opts.onChange?.()
-  }
-
-  async removeSchedule(id: string): Promise<void> {
-    await this.opts.schedules.removeSchedule(id)
+  async setSchedule(agentId: string, schedule: ScheduleSpec | null): Promise<void> {
+    await this.opts.configs.setSchedule(agentId, schedule)
     await this.runSync()
     this.opts.onChange?.()
   }
@@ -129,10 +151,10 @@ export class SchedulerEngine {
     return this.missed.map((m) => ({ ...m }))
   }
 
-  async runManually(jobId: string): Promise<JobRun> {
+  async runManually(agentId: string): Promise<JobRun> {
     const stub: JobRun = {
       id: newId(),
-      jobId,
+      jobId: agentId,
       scheduleId: null,
       trigger: 'manual',
       startedAt: new Date().toISOString(),
@@ -144,10 +166,10 @@ export class SchedulerEngine {
       outputPath: null
     }
 
-    const agent = this.agents.find((a) => a.id === jobId)
-    if (!agent || !agent.scriptPath) {
+    const script = this.scripts.find((s) => s.id === agentId)
+    if (!script) {
       stub.status = 'error'
-      stub.error = `no agent script for "${jobId}"`
+      stub.error = `no script found for agent "${agentId}"`
       stub.endedAt = new Date().toISOString()
       return stub
     }
@@ -166,7 +188,7 @@ export class SchedulerEngine {
 
     const cp = spawn(
       this.wrapperPath,
-      [this.opts.dataDir, '', jobId, agent.scriptPath, stub.id],
+      [this.opts.dataDir, '', agentId, script.scriptPath, stub.id],
       {
         detached: true,
         stdio: 'ignore',
@@ -250,11 +272,13 @@ export class SchedulerEngine {
     }
 
     const entries: CrontabEntry[] = []
-    for (const s of this.listSchedules()) {
-      if (s.orphaned) continue
-      const agent = this.agents.find((a) => a.id === s.jobId)
-      if (!agent?.scriptPath) continue
-      entries.push({ schedule: s, scriptPath: agent.scriptPath })
+    for (const agent of this.listAgents()) {
+      if (!agent.schedule || !agent.scriptPath) continue
+      entries.push({
+        agentId: agent.id,
+        scriptPath: agent.scriptPath,
+        spec: agent.schedule
+      })
     }
 
     try {
@@ -277,14 +301,21 @@ export class SchedulerEngine {
   }
 
   async runSweep(): Promise<void> {
-    const schedules = this.listSchedules()
+    const agents = this.listAgents()
     const runs = this.opts.runs.list(undefined, 1000)
-    const next = detectMissed(schedules, runs)
+    const next = detectMissed(agents, runs)
     if (!missedEqual(this.missed, next)) {
       this.missed = next
       this.opts.onChange?.()
     }
   }
+}
+
+function humanize(id: string): string {
+  return id
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+    .trim()
 }
 
 async function detectBin(bin: string): Promise<boolean> {

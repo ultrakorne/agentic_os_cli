@@ -2,50 +2,62 @@
 
 ## Architecture
 
-`src/main/index.ts` resolves three roots on app ready:
+`src/main/index.ts` resolves two roots on app ready:
 
-- `dataDir = app.getPath('userData') + '/data'` — schedules, run logs, wrapper, state
-- `agentsDir = app.getPath('userData') + '/agents'` — user-owned executable scripts
+- `dataDir = app.getPath('userData') + '/data'` — engine state and user scripts (the latter under `dataDir/agents/`)
 - `resourcesDir` — bundled assets (`wrapper.sh`, seed agents); resolved differently in dev vs packaged builds
 
-`defaultDataPaths(dataDir)` returns the four canonical paths under `data/` (schedules, state, legacy `runs.jsonl`, and the new `runs/` directory). Before constructing stores, `migrateLegacyStateIfNeeded` runs (legacy combined `state.json` splitter — unchanged from earlier versions). The two stores then `load()`, the engine installs the wrapper into `dataDir`, seeds the agents dir if empty, scans agents, reconciles the crontab, and starts watching the runs directory.
+The engine then loads `agents.json`, indexes the runs directory, installs the wrapper, seeds the agents dir if empty, scans agents, reconciles the crontab, and starts watching the runs directory.
 
 ## Source Files
 
 | File | Role |
 |------|------|
-| `src/main/scheduler/migrate.ts` | `defaultDataPaths` (now includes `runsDir`) + `migrateLegacyStateIfNeeded` |
-| `src/main/scheduler/schedule-store.ts` | Owns `schedules.json` + `state.json`; atomic-rename writes, per-file queues |
-| `src/main/scheduler/runs-store.ts` | Reader: indexes `<dataDir>/runs/<id>.json` files; reads legacy `runs.jsonl`; fs.watch + debounce; lazy output read |
-| `src/main/agents/scanner.ts` | Lists executable files under `<userData>/agents/`; reads optional `.meta.json` siblings; seeds dir on first run |
-| `src/main/index.ts` | Resolves the three roots, runs migration, wires the stores into the engine |
+| `src/main/scheduler/agent-config-store.ts` | Owns `agents.json`; atomic-rename writes, single write queue; `setSchedule(id, spec | null)` is the main mutation |
+| `src/main/scheduler/runs-store.ts` | Reader: indexes `<dataDir>/runs/<id>.json` files; fs.watch + debounce; lazy output read; pair-aware GC |
+| `src/main/agents/scanner.ts` | Walks `<dataDir>/agents/` (top-level + first-level subdirs); attributes section from parent folder; deduplicates ids |
+| `src/main/index.ts` | Resolves the roots and wires the stores into the engine |
 
 ## Data Model
 
-### `schedules.json`
+### `agents.json`
 
 ```json
 {
-  "schedules": [
-    { "id": "ping", "jobId": "ping", "spec": { "kind": "hourly", "everyHours": 1, "minute": 0 } },
-    { "id": "morning-digest", "jobId": "morning-digest", "spec": { "kind": "daily", "days": ["mon","tue","wed","thu","fri"], "hour": 9, "minute": 0 } }
+  "agents": [
+    {
+      "id": "ping",
+      "schedule": { "kind": "hourly", "everyHours": 1, "minute": 0 }
+    },
+    {
+      "id": "morning-digest",
+      "title": "Morning digest",
+      "description": "Summarize overnight notifications",
+      "schedule": { "kind": "daily", "days": ["mon","tue","wed","thu","fri"], "hour": 9, "minute": 0 }
+    },
+    {
+      "id": "release-notes"
+    }
   ]
 }
 ```
 
-`Schedule` and `ScheduleSpec` are defined in `src/shared/scheduler.ts`. The `orphaned: boolean` field is computed at read time by joining `jobId` against the discovered agents — it is **never** persisted.
+`AgentConfig` is defined in `src/shared/scheduler.ts`. Every field except `id` is optional. The dashboard typically writes only `id + schedule`; `title` and `description` are populated by hand-edit. Section is **never** stored here — it's read from the script's parent directory at scan time.
 
-### `state.json`
+The dashboard's unified `Agent` view (returned by `agents:list`) is computed at IPC time by joining this file against the scanned scripts:
 
-```json
-{
-  "state": {
-    "ping": { "lastFiredAt": "2026-05-08T15:00:00.000Z" }
-  }
+```ts
+type Agent = {
+  id: string
+  title: string         // resolved (config.title || humanize(id))
+  description: string
+  section: string       // from disk
+  scriptPath?: string   // undefined = orphan config entry
+  schedule?: ScheduleSpec
+  scheduled: boolean
+  orphaned: boolean
 }
 ```
-
-`lastFiredAt` is preserved for backward compatibility but no longer drives any code path. The engine does not write to it under the cron-based architecture; legacy values stay on disk.
 
 ### `runs/<run-id>.json`
 
@@ -71,30 +83,36 @@ The wrapper writes a `running` meta record first, then rewrites with `endedAt` /
 
 ### `runs/<run-id>.out`
 
-Combined stdout+stderr from the agent. Written incrementally by the wrapper via shell redirection. Read lazily by the main process — `RunsStore` populates a tail summary (last ~4KB) into `JobRun.output` at ingest time, and serves the full file on demand via the `scheduler:read-run-output` IPC method.
-
-### `runs.jsonl` (legacy)
-
-Old append-only file from before the refactor. Read once at boot into the in-memory cache as historical data; never appended again. New runs land only in `runs/`.
+Combined stdout+stderr from the agent. Written incrementally by shell redirection. Read lazily by the main process — `RunsStore` populates a tail summary (last ~4KB) into `JobRun.output` at ingest time, full file served on demand via `scheduler:read-run-output`.
 
 ### `wrapper.sh`
 
-Copied from `resources/wrapper.sh` into `<dataDir>/wrapper.sh` on every engine start, then `chmod 755`. The on-disk path is what the managed crontab section references — keeping it stable across upgrades.
+Copied from `resources/wrapper.sh` into `<dataDir>/wrapper.sh` on every engine start, then `chmod 755`. The on-disk path is what the managed crontab section references.
 
-### `<userData>/agents/`
+### `<dataDir>/agents/`
 
-User-owned scripts. The filename without extension is the agent id (`ping.sh` → `ping`). Optional sibling `<id>.meta.json` supplies `{ title, description, section }`. On first run the engine copies seed agents (`ping.sh`, `disk-free.sh`, `README.md`) from `resources/agents/`.
+User-owned scripts. Scanned with this layout:
+
+```
+data/agents/
+  ping.sh                       → id="ping",      section="Agents"
+  Daily/morning-digest.sh       → id="morning-digest", section="Daily"
+  Engineering/pr-watch.sh       → id="pr-watch",  section="Engineering"
+  .hidden/ignored.sh            → skipped (dot-prefixed)
+  Daily/sub/too-deep.sh         → skipped (deeper than first level)
+```
+
+IDs must be unique across the whole tree; duplicates are dropped (top-level wins, then alphabetical) with a `[scanner]` console warning.
 
 ## Noteworthy Behavior
 
-- **Per-run files, not jsonl appends.** Each run creates two files (`<id>.json` + `<id>.out`). Atomic via temp + rename for the meta; raw redirection for the output. No flock contention, no escaping headaches in bash.
+- **Per-run files, not jsonl appends.** Each run creates two files (`<id>.json` + `<id>.out`). Atomic via temp + rename for the meta; raw redirection for the output.
 - **fs.watch on `runs/`** is debounced 250ms; the 5-minute missed-run sweep doubles as a safety net for any watch events the OS drops.
-- **GC at engine start, not continuous.** If `runs/` exceeds 2000 files, the oldest by mtime are deleted down to that cap. No automatic rotation while the app runs.
-- **In-memory cache is 500 newest runs.** Plus a tail summary per run (~4KB). Renderer-visible memory stays bounded even as the on-disk run count grows toward the 2000-file cap.
-- **Atomic-rename for the JSON files**, raw `appendFile` for nothing (the legacy JSONL is read-only now). `writeJson` writes `path.tmp` then `rename`s.
-- **Per-file write queues** still serialise mutations in `ScheduleStore`. `RunsStore` doesn't need a write queue — it's a reader.
-- **Legacy migration is detected by content shape.** `isLegacyShape` checks for `schedules` or `runs` at the root of `state.json`. Unchanged from before; old combined `state.json` is renamed to `state.json.legacy` rather than deleted.
-- **Missing files are not errors.** All stores treat `ENOENT` as "first run, start empty"; the migrator treats `ENOENT` on `state.json` as "nothing to migrate"; the agents scanner treats `ENOENT` on the agents dir as "create then return empty".
+- **GC at engine start, not continuous.** If `runs/` exceeds 2000 runs, the oldest by mtime are deleted down to that cap. Files are grouped by stem so `<id>.json` and `<id>.out` always age out together — never an orphan on either side.
+- **In-memory cache is 500 newest runs.** Plus a tail summary per run (~4KB).
+- **Atomic-rename for the JSON files.** `writeJson` writes `path.tmp` then `rename`s.
+- **Single write queue** in `AgentConfigStore` serialises mutations.
+- **Missing files are not errors.** All readers treat `ENOENT` as "first run, start empty"; the agents scanner creates the dir on first call.
 
 ## Dependencies
 

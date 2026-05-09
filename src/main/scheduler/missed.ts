@@ -1,5 +1,5 @@
 import { Cron } from 'croner'
-import type { JobRun, MissedRun, Schedule } from './types'
+import type { Agent, JobRun, MissedRun } from './types'
 import { compileToCron } from './spec'
 
 export type DetectOpts = {
@@ -14,7 +14,7 @@ const DEFAULT_TOLERANCE_MS = 90 * 1000
 const DEFAULT_MAX_TICKS = 500
 
 export function detectMissed(
-  schedules: Schedule[],
+  agents: Agent[],
   runs: JobRun[],
   opts: DetectOpts = {}
 ): MissedRun[] {
@@ -26,12 +26,12 @@ export function detectMissed(
 
   const out: MissedRun[] = []
 
-  for (const sched of schedules) {
-    if (sched.orphaned) continue
+  for (const agent of agents) {
+    if (!agent.schedule || !agent.scriptPath) continue
 
     let cron: Cron
     try {
-      cron = new Cron(compileToCron(sched.spec))
+      cron = new Cron(compileToCron(agent.schedule))
     } catch {
       continue
     }
@@ -49,20 +49,15 @@ export function detectMissed(
     if (expected.length === 0) continue
 
     const actuals = runs
-      .filter((r) => r.scheduleId === sched.id)
+      .filter((r) => r.jobId === agent.id)
       .map((r) => new Date(r.startedAt).getTime())
       .sort((a, b) => a - b)
 
     for (const exp of expected) {
       const expMs = exp.getTime()
       if (now.getTime() - expMs < toleranceMs) continue
-      const matched = anyWithin(actuals, expMs, toleranceMs)
-      if (!matched) {
-        out.push({
-          scheduleId: sched.id,
-          jobId: sched.jobId,
-          expectedAt: exp.toISOString()
-        })
+      if (!anyWithin(actuals, expMs, toleranceMs)) {
+        out.push({ agentId: agent.id, expectedAt: exp.toISOString() })
       }
     }
   }
@@ -87,7 +82,7 @@ function anyWithin(sorted: number[], target: number, tolerance: number): boolean
 
 export function missedEqual(a: MissedRun[], b: MissedRun[]): boolean {
   if (a.length !== b.length) return false
-  const key = (m: MissedRun): string => `${m.scheduleId}|${m.expectedAt}`
+  const key = (m: MissedRun): string => `${m.agentId}|${m.expectedAt}`
   const seen = new Set(a.map(key))
   for (const m of b) if (!seen.has(key(m))) return false
   return true

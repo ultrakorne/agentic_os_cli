@@ -1,4 +1,4 @@
-import type { Schedule, ScheduleSpec, Weekday } from '@shared/scheduler'
+import type { ScheduleSpec, Weekday } from '@shared/scheduler'
 
 const DAY_LABELS: Record<Weekday, string> = {
   mon: 'Mon',
@@ -35,9 +35,9 @@ export function describeSpec(spec: ScheduleSpec): string {
   return `${ordered.map((d) => DAY_LABELS[d].slice(0, 3)).join(' ')} @ ${time}`
 }
 
-export function describeSchedule(sched: Schedule | undefined): string {
-  if (!sched) return 'unscheduled'
-  return describeSpec(sched.spec)
+export function describeSchedule(spec: ScheduleSpec | undefined): string {
+  if (!spec) return 'unscheduled'
+  return describeSpec(spec)
 }
 
 export function relativeFromNow(iso: string | null, now = new Date()): string {

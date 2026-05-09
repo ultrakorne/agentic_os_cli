@@ -30,6 +30,6 @@ export function applyTheme(theme: Theme): void {
   for (const [key, varName] of VAR_MAP) {
     root.style.setProperty(varName, theme.colors[key])
   }
+  root.dataset.themeId = theme.id
   root.dataset.themeName = theme.name
-  root.dataset.themeSource = theme.source
 }

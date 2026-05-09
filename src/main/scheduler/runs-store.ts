@@ -9,43 +9,19 @@ const RUNS_HARD_CAP = 2000 // max distinct runs (each run = 1 .json + up to 1 .o
 
 export class RunsStore {
   private cache = new Map<string, JobRun>()
-  private legacy: JobRun[] = []
   private watcher: FSWatcher | null = null
   private debounceTimer: NodeJS.Timeout | null = null
   private onChangeCb: (() => void) | null = null
 
   constructor(
     private runsDir: string,
-    private legacyJsonl: string,
     private cacheLimit: number = DEFAULT_CACHE_LIMIT
   ) {}
 
   async load(): Promise<void> {
     await fs.mkdir(this.runsDir, { recursive: true })
-    await this.loadLegacy()
     await this.indexRunsDir()
     await this.gcRunsDir()
-  }
-
-  private async loadLegacy(): Promise<void> {
-    try {
-      const txt = await fs.readFile(this.legacyJsonl, 'utf8')
-      const lines = txt.split('\n').filter((l) => l.length > 0)
-      const recent = lines.slice(-this.cacheLimit)
-      const out: JobRun[] = []
-      for (const l of recent) {
-        try {
-          const r = JSON.parse(l) as Partial<JobRun>
-          if (typeof r.id !== 'string') continue
-          out.push(normalizeRun(r))
-        } catch {
-          /* skip malformed */
-        }
-      }
-      this.legacy = out
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    }
   }
 
   private async indexRunsDir(): Promise<void> {
@@ -83,25 +59,18 @@ export class RunsStore {
     for (const r of this.cache.values()) {
       if (!jobId || r.jobId === jobId) out.push(r)
     }
-    for (const r of this.legacy) {
-      if (this.cache.has(r.id)) continue
-      if (!jobId || r.jobId === jobId) out.push(r)
-    }
     out.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
     return out.slice(0, limit).map((r) => ({ ...r }))
   }
 
   async readOutput(runId: string): Promise<string | null> {
     const cached = this.cache.get(runId)
-    if (cached?.outputPath) {
-      try {
-        return await fs.readFile(join(this.runsDir, cached.outputPath), 'utf8')
-      } catch {
-        return null
-      }
+    if (!cached?.outputPath) return null
+    try {
+      return await fs.readFile(join(this.runsDir, cached.outputPath), 'utf8')
+    } catch {
+      return null
     }
-    const legacy = this.legacy.find((r) => r.id === runId)
-    return legacy?.output ?? null
   }
 
   startWatching(onChange: () => void): void {

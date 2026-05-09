@@ -40,19 +40,19 @@ export function MissedRunsBanner(): JSX.Element | null {
       </div>
       <ul className="mt-2 flex flex-col divide-y divide-[var(--color-rule)] text-[11px]">
         {top.map((m) => (
-          <li key={`${m.scheduleId}|${m.expectedAt}`} className="flex items-center gap-3 py-1.5">
+          <li key={`${m.agentId}|${m.expectedAt}`} className="flex items-center gap-3 py-1.5">
             <span
               className="font-display text-[12px] font-bold uppercase text-[var(--color-fg)]"
               style={{ letterSpacing: '0.16em' }}
             >
-              {m.jobId}
+              {m.agentId}
             </span>
             <span className="text-[var(--color-fg-dim)] tabular">
               expected {relativeFromNow(m.expectedAt)}
             </span>
             <button
               type="button"
-              onClick={() => runNow(m.jobId)}
+              onClick={() => runNow(m.agentId)}
               className="ml-auto border border-[var(--color-hot)] px-2 py-0.5 font-display text-[10px] font-bold uppercase text-[var(--color-hot)] transition-colors hover:bg-[var(--color-hot)] hover:text-[var(--color-bg)]"
               style={{ letterSpacing: '0.22em' }}
             >
