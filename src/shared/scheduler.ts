@@ -53,5 +53,7 @@ export type CrontabStatus = {
   wrapperOk: boolean
   pythonOk: boolean
   crontabOk: boolean
+  // null when we can't determine (e.g. pgrep unavailable, Windows).
+  daemonOk: boolean | null
   error: string | null
 }

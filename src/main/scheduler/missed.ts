@@ -63,31 +63,21 @@ export function detectMissed(
       .map((r) => new Date(r.startedAt).getTime())
       .sort((a, b) => a - b)
 
+    // Any run started at-or-after an expected tick (within tolerance) "covers"
+    // it — including a manual run made now after a missed scheduled slot.
+    // Once the user has run the agent, prior gaps are considered acknowledged.
+    const latestRunMs = actuals.length > 0 ? actuals[actuals.length - 1] : null
+
     for (const exp of expected) {
       const expMs = exp.getTime()
       if (now.getTime() - expMs < toleranceMs) continue
-      if (!anyWithin(actuals, expMs, toleranceMs)) {
-        out.push({ agentId: agent.id, expectedAt: exp.toISOString() })
-      }
+      if (latestRunMs !== null && latestRunMs >= expMs - toleranceMs) continue
+      out.push({ agentId: agent.id, expectedAt: exp.toISOString() })
     }
   }
 
   out.sort((a, b) => b.expectedAt.localeCompare(a.expectedAt))
   return out
-}
-
-function anyWithin(sorted: number[], target: number, tolerance: number): boolean {
-  if (sorted.length === 0) return false
-  let lo = 0
-  let hi = sorted.length - 1
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1
-    const v = sorted[mid]
-    if (Math.abs(v - target) <= tolerance) return true
-    if (v < target) lo = mid + 1
-    else hi = mid - 1
-  }
-  return false
 }
 
 export function missedEqual(a: MissedRun[], b: MissedRun[]): boolean {

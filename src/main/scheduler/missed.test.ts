@@ -46,20 +46,32 @@ describe('detectMissed', () => {
     expect(detectMissed([agent], runs, { now, windowMs: 6 * 3600_000 })).toEqual([])
   })
 
-  it('flags ticks with no nearby run', () => {
+  it('flags only ticks after the most recent run', () => {
     const now = new Date('2026-05-09T05:30:00Z')
     const agent = hourlyAgent('ping')
+    // last run was at 03:00:01 — earlier gaps are considered acknowledged,
+    // so only 04:00 and 05:00 remain missed.
     const runs = [
       run('ping', new Date('2026-05-09T00:00:01Z')),
       run('ping', new Date('2026-05-09T01:00:00Z')),
-      run('ping', new Date('2026-05-09T03:00:01Z')),
-      run('ping', new Date('2026-05-09T05:00:00Z'))
+      run('ping', new Date('2026-05-09T03:00:01Z'))
     ]
     const missed = detectMissed([agent], runs, { now, windowMs: 6 * 3600_000 })
-    const expectedSet = missed.map((m) => m.expectedAt).sort()
-    expect(expectedSet).toContain('2026-05-09T02:00:00.000Z')
-    expect(expectedSet).toContain('2026-05-09T04:00:00.000Z')
-    expect(expectedSet).toHaveLength(2)
+    const times = missed.map((m) => m.expectedAt).sort()
+    expect(times).toEqual([
+      '2026-05-09T04:00:00.000Z',
+      '2026-05-09T05:00:00.000Z'
+    ])
+  })
+
+  it('clears prior missed ticks when a later run exists (e.g. manual)', () => {
+    const now = new Date('2026-05-09T05:30:00Z')
+    const agent = hourlyAgent('ping')
+    // Schedule fired at 00:00..05:00 with no on-time runs, but a manual run
+    // at 05:25 covers the gap and clears the banner.
+    const runs = [run('ping', new Date('2026-05-09T05:25:00Z'))]
+    const missed = detectMissed([agent], runs, { now, windowMs: 6 * 3600_000 })
+    expect(missed).toEqual([])
   })
 
   it('does not flag ticks within tolerance even if not exact', () => {

@@ -54,7 +54,8 @@ Each cron line carries a trailing `# agentic_os:<agentId>` tag. The tag lets the
 
 - **`previousRun()` is not used.** croner's `previousRun()` only returns a value if the cron has actually fired in-process — it doesn't compute "what would the prior tick be". `missed.detectMissed` walks forward via `cron.nextRun(cursor)` from `now - windowMs` to `now`, which is reliable.
 - **Tolerance is 90s.** Generous to cover cron jitter, machine wake-up lag, and clock skew. A schedule for `:00` matches a run at `:00:30` or `:00:00.500`.
-- **Missed-run sweep runs even when no UI is open.** A setInterval on the engine, fires every 5 minutes, broadcasts only when the missed set changes.
+- **A later run clears prior missed slots.** `detectMissed` flags an expected tick T as missed only if the agent's most recent run started before `T - tolerance`. A manual run from the UI (or a catch-up scheduled run) implicitly acknowledges all prior gaps for that agent — the banner clears without waiting for the next on-time tick.
+- **Missed-run sweep runs even when no UI is open.** A setInterval on the engine, fires every 5 minutes, broadcasts only when the missed set changes. The runs-directory watcher also triggers a sweep on every change so manual-run completions clear the banner immediately.
 - **fs.watch is debounced 250ms.** When the wrapper writes the running meta and then the final meta, both events would otherwise re-broadcast. The 5-minute sweep also re-indexes the dir as a safety net.
 - **Output is read lazily.** `RunsStore.list()` returns each run with a tail summary (last 4KB) populated at ingest time; full output is only loaded on `scheduler:read-run-output(runId)`.
 - **Runs dir GC at engine start.** Files are grouped by run-id stem so `<id>.json` + `<id>.out` are always deleted as a pair, never leaving an orphan on either side.
@@ -67,6 +68,7 @@ Each cron line carries a trailing `# agentic_os:<agentId>` tag. The tag lets the
 - **`purgeAllManaged` only removes complete BEGIN..END pairs.** A stray BEGIN with no END (or stray END) deletes only the marker line itself — never trailing user content.
 - **Crontab read-modify-write is not atomic.** `crontab -l` followed by `crontab -` has a TOCTOU window. POSIX provides no compare-and-swap primitive. Mitigation: writes are infrequent (only on schedule edits), and the trailing `# agentic_os:<agentId>` per-line tags let a damaged managed section still be parsed back to original ids.
 - **`crontab` and `python3` absence are surfaced, not hidden.** `engine.start()` checks both with `--version`; `crontabStatus` returns `crontabOk` / `pythonOk` / `wrapperOk` flags; the dashboard's `SystemBanner` renders an actionable error if anything's missing.
+- **Cron daemon liveness is checked separately from the binary.** A user can have `crontab` on PATH but the daemon disabled (Arch ships `cronie.service` disabled by default — schedules are silently never fired). `crontabStatus.daemonOk` is computed by `pgrep -x` against `crond` / `cron` / `cronie`; the banner surfaces `daemonOk === false` with a `systemctl enable --now cronie` hint. `daemonOk` is `null` (silent) when detection isn't possible (Windows, missing `pgrep`).
 
 ## Dependencies
 

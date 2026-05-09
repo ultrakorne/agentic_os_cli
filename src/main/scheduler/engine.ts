@@ -68,7 +68,9 @@ export class SchedulerEngine {
       console.warn('[engine] crontab not found on PATH — schedules will not be installed')
     }
     await this.runSync()
-    this.opts.runs.startWatching(() => this.opts.onChange?.())
+    this.opts.runs.startWatching(() => {
+      void this.handleRunsChanged()
+    })
     await this.runSweep()
     this.sweepTimer = setInterval(() => {
       void this.runSweep()
@@ -211,6 +213,7 @@ export class SchedulerEngine {
   }
 
   async crontabStatus(): Promise<CrontabStatus> {
+    const daemonOk = await detectCronDaemon()
     if (!this.crontabOk) {
       return {
         managed: false,
@@ -219,6 +222,7 @@ export class SchedulerEngine {
         wrapperOk: this.wrapperOk,
         pythonOk: this.pythonOk,
         crontabOk: false,
+        daemonOk,
         error: this.crontabError ?? 'crontab not found on PATH'
       }
     }
@@ -232,6 +236,7 @@ export class SchedulerEngine {
         wrapperOk: this.wrapperOk,
         pythonOk: this.pythonOk,
         crontabOk: this.crontabOk,
+        daemonOk,
         error: this.crontabError
       }
     } catch (err) {
@@ -242,6 +247,7 @@ export class SchedulerEngine {
         wrapperOk: this.wrapperOk,
         pythonOk: this.pythonOk,
         crontabOk: this.crontabOk,
+        daemonOk,
         error: (err as Error).message
       }
     }
@@ -320,6 +326,14 @@ export class SchedulerEngine {
     }
   }
 
+  private async handleRunsChanged(): Promise<void> {
+    // Refresh missed runs first so the dashboard sees a single coalesced
+    // update — clicking "run now" should clear any prior missed slot for
+    // this agent without waiting for the next 5-minute sweep.
+    await this.runSweep({ notify: false })
+    this.opts.onChange?.()
+  }
+
   async runSweep({ notify = true }: { notify?: boolean } = {}): Promise<void> {
     const agents = this.listAgents()
     const runs = this.opts.runs.list(undefined, 1000)
@@ -343,5 +357,32 @@ async function detectBin(bin: string): Promise<boolean> {
     const cp = spawn(bin, ['--version'], { stdio: 'ignore' })
     cp.on('error', () => resolve(false))
     cp.on('close', (code) => resolve(code === 0 || code === 1))
+  })
+}
+
+// `null` means we can't determine — don't false-alarm the UI.
+async function detectCronDaemon(): Promise<boolean | null> {
+  if (process.platform === 'win32') return null
+  // cronie ships /usr/bin/crond; vixie-cron and macOS use `cron`; cover both.
+  const names = ['crond', 'cron', 'cronie']
+  let pgrepWorked = false
+  for (const name of names) {
+    const r = await runPgrep(name)
+    if (r === 'match') return true
+    if (r === 'nomatch') pgrepWorked = true
+  }
+  return pgrepWorked ? false : null
+}
+
+function runPgrep(name: string): Promise<'match' | 'nomatch' | 'unavailable'> {
+  return new Promise((resolve) => {
+    const cp = spawn('pgrep', ['-x', name], { stdio: 'ignore' })
+    cp.on('error', () => resolve('unavailable'))
+    cp.on('close', (code) => {
+      // pgrep: 0 = match, 1 = no match, 2/3 = error.
+      if (code === 0) resolve('match')
+      else if (code === 1) resolve('nomatch')
+      else resolve('unavailable')
+    })
   })
 }

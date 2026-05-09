@@ -70,7 +70,7 @@ export function Dashboard(): JSX.Element {
                 agentCount={g.items.length}
                 scheduledCount={scheduledCount}
               >
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(320px,380px))]">
                   {g.items.map((agent) => (
                     <AgentCard
                       key={agent.id}

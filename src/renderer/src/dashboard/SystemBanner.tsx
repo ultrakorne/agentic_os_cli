@@ -28,6 +28,12 @@ export function SystemBanner({ orphanCount }: Props): JSX.Element | null {
         text: 'crontab not found — install cron (cronie on Arch, or vixie-cron / system cron) to enable scheduling'
       })
     }
+    if (status.crontabOk && status.daemonOk === false) {
+      issues.push({
+        tone: 'danger',
+        text: 'cron daemon not running — schedules will not fire (try: systemctl enable --now cronie)'
+      })
+    }
     if (!status.wrapperOk) {
       issues.push({ tone: 'danger', text: 'wrapper.sh missing — scheduled runs will not record' })
     }

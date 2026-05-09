@@ -1,4 +1,4 @@
-import { type JSX } from 'react'
+import { useEffect, useState, type JSX } from 'react'
 import { useApp } from '../store'
 import { relativeFromNow } from '../lib/format'
 
@@ -6,13 +6,31 @@ const SHOW = 3
 
 export function MissedRunsBanner(): JSX.Element | null {
   const missed = useApp((s) => s.missed)
+  const [launchError, setLaunchError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!launchError) return
+    const t = setTimeout(() => setLaunchError(null), 5000)
+    return () => clearTimeout(t)
+  }, [launchError])
+
   if (missed.length === 0) return null
 
   const top = missed.slice(0, SHOW)
   const remaining = missed.length - top.length
 
-  const runNow = (jobId: string): void => {
-    void window.api.scheduler.runNow(jobId)
+  const runNow = async (jobId: string): Promise<void> => {
+    setLaunchError(null)
+    try {
+      const res = await window.api.scheduler.runNow(jobId)
+      if (res.status === 'error') {
+        setLaunchError(`${jobId}: ${res.error ?? 'run failed to launch'}`)
+      }
+    } catch (err) {
+      setLaunchError(
+        `${jobId}: ${err instanceof Error ? err.message : 'run failed to launch'}`
+      )
+    }
   }
 
   return (
@@ -52,7 +70,9 @@ export function MissedRunsBanner(): JSX.Element | null {
             </span>
             <button
               type="button"
-              onClick={() => runNow(m.agentId)}
+              onClick={() => {
+                void runNow(m.agentId)
+              }}
               className="ml-auto border border-[var(--color-hot)] px-2 py-0.5 font-display text-[10px] font-bold uppercase text-[var(--color-hot)] transition-colors hover:bg-[var(--color-hot)] hover:text-[var(--color-bg)]"
               style={{ letterSpacing: '0.22em' }}
             >
@@ -67,6 +87,16 @@ export function MissedRunsBanner(): JSX.Element | null {
           style={{ letterSpacing: '0.22em' }}
         >
           and {remaining} more
+        </p>
+      )}
+      {launchError && (
+        <p
+          role="alert"
+          className="mt-2 truncate text-[10px] uppercase text-[var(--color-danger)] neon-text-soft"
+          style={{ letterSpacing: '0.16em' }}
+          title={launchError}
+        >
+          ▲ {launchError}
         </p>
       )}
     </div>

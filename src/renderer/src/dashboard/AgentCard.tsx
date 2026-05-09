@@ -82,10 +82,15 @@ export function AgentCard({
 
       {/* header: status + id + run */}
       <div className="relative flex items-start gap-2.5">
-        <StatusGlyph status={status} scheduled={!!schedule} live={live} />
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <StatusGlyph
+          status={status}
+          scheduled={!!schedule}
+          live={live}
+          missed={missedCount > 0}
+        />
+        <span className="min-w-0 flex-1">
           <span
-            className={`font-display truncate text-[13px] font-bold uppercase ${
+            className={`font-display block truncate text-[13px] font-bold uppercase ${
               selected
                 ? 'self-start bg-[var(--color-hot)] px-1.5 text-[var(--color-bg)]'
                 : 'text-[var(--color-fg)]'
@@ -94,24 +99,21 @@ export function AgentCard({
           >
             {agent.id}
           </span>
-          <span
-            className="text-[9px] uppercase text-[var(--color-fg-faint)]"
-            style={{ letterSpacing: '0.24em' }}
-          >
-            {agent.section}
-          </span>
+          {recentRun && (
+            <span className="mt-0.5 block text-[10px] text-[var(--color-fg-faint)] tabular">
+              {relativeFromNow(recentRun.startedAt)}
+            </span>
+          )}
         </span>
         <RunButton onClick={handleRun} running={running} />
       </div>
 
       {/* description */}
-      <p className="relative line-clamp-2 min-h-[2.4em] text-[12px] leading-relaxed text-[var(--color-fg-dim)]">
-        {agent.description ? (
-          agent.description
-        ) : (
-          <span className="text-[var(--color-fg-faint)] italic">// no description</span>
-        )}
-      </p>
+      {agent.description && (
+        <p className="relative line-clamp-2 text-[12px] leading-relaxed text-[var(--color-fg-dim)]">
+          {agent.description}
+        </p>
+      )}
 
       {launchError && (
         <p
@@ -138,14 +140,6 @@ export function AgentCard({
         >
           {describeSchedule(schedule)}
         </span>
-        {missedCount > 0 && (
-          <span
-            className="text-[var(--color-danger)] neon-text-soft"
-            title={`${missedCount} missed in last 24h`}
-          >
-            ▲ {missedCount} missed
-          </span>
-        )}
         <span className="ml-auto text-[var(--color-fg-dim)]">
           {nextRunIso ? (
             <>
@@ -207,11 +201,13 @@ function RunButton({
 function StatusGlyph({
   status,
   scheduled,
-  live
+  live,
+  missed
 }: {
   status: Status
   scheduled: boolean
   live: boolean
+  missed: boolean
 }): JSX.Element {
   if (live) {
     return (
@@ -220,6 +216,17 @@ function StatusGlyph({
         className="pulse-soft mt-0.5 inline-flex size-4 items-center justify-center text-base text-[var(--color-cool)] neon-text"
       >
         ●
+      </span>
+    )
+  }
+  if (missed) {
+    return (
+      <span
+        aria-label="missed scheduled run"
+        title="missed scheduled run"
+        className="mt-0.5 inline-flex size-4 items-center justify-center text-base text-[var(--color-hot)] neon-text-soft"
+      >
+        ▽
       </span>
     )
   }
