@@ -1,0 +1,30 @@
+import type { ThemeDef } from '../theme'
+
+export const catppuccinLatte: ThemeDef = {
+  id: 'catppuccin-latte',
+  name: 'catppuccin-latte',
+  colors: {
+    bg: '#eff1f5',
+    fg: '#4c4f69',
+    accent: '#1e66f5',
+    cursor: '#dc8a78',
+    selectionFg: '#eff1f5',
+    selectionBg: '#dc8a78',
+    color0: '#bcc0cc',
+    color1: '#d20f39',
+    color2: '#40a02b',
+    color3: '#df8e1d',
+    color4: '#1e66f5',
+    color5: '#ea76cb',
+    color6: '#179299',
+    color7: '#5c5f77',
+    color8: '#acb0be',
+    color9: '#d20f39',
+    color10: '#40a02b',
+    color11: '#df8e1d',
+    color12: '#1e66f5',
+    color13: '#ea76cb',
+    color14: '#179299',
+    color15: '#6c6f85'
+  }
+}

@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { SchedulerEngine } from './scheduler/engine'
 import { AgentConfigStore } from './scheduler/agent-config-store'
 import { RunsStore } from './scheduler/runs-store'
+import { computeDevTickCommand } from './scheduler/tick-command'
 import { broadcastChange, registerIpc } from './ipc'
 import { createThemeStore } from './theme/loader'
 
@@ -64,12 +65,19 @@ app.whenReady().then(async () => {
 
   const configs = new AgentConfigStore(join(dataDir, 'agents.json'))
   const runs = new RunsStore(join(dataDir, 'runs'))
+  const tickCommand = is.dev
+    ? computeDevTickCommand({
+        appPath: app.getAppPath(),
+        tickLogPath: join(dataDir, 'tick.log')
+      })
+    : null
   engine = new SchedulerEngine({
     configs,
     runs,
     dataDir,
     agentsDir,
     resourcesDir,
+    tickCommand,
     onChange: () => broadcastChange()
   })
   await engine.start()

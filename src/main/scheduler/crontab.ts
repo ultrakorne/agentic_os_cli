@@ -1,9 +1,21 @@
 import { spawn } from 'child_process'
+import { promises as fsp } from 'fs'
+import { join } from 'path'
 import type { ScheduleSpec } from './types'
 import { compileToCron } from './spec'
+import { TICK_CRON_SCHEDULE, TICK_MARKER_ID } from './tick-command'
 
 export const BEGIN_MARKER = '# BEGIN agentic_os (managed - do not edit)'
 export const END_MARKER = '# END agentic_os'
+
+// Advisory lock around the crontab read-modify-write critical section.
+// Both the Electron main process and the headless tick CLI call syncCrontab
+// — without this lock, a near-simultaneous run can lose updates (the later
+// writer's `crontab -` clobbers whatever the earlier writer just installed).
+const LOCK_FILENAME = '.crontab.lock'
+const LOCK_STALE_MS = 30_000
+const LOCK_WAIT_TIMEOUT_MS = 10_000
+const LOCK_POLL_MS = 100
 
 export type ManagedExtract = {
   before: string
@@ -121,9 +133,13 @@ function shellQuote(s: string): string {
 export function buildManagedBlock(
   entries: CrontabEntry[],
   wrapperPath: string,
-  dataDir: string
+  dataDir: string,
+  tickCommand?: string | null
 ): string {
   const out: string[] = [BEGIN_MARKER]
+  if (tickCommand) {
+    out.push(`${TICK_CRON_SCHEDULE} ${tickCommand} # agentic_os:${TICK_MARKER_ID}`)
+  }
   for (const entry of entries) {
     const cron = compileToCron(entry.spec)
     const cmd = [
@@ -143,25 +159,81 @@ export async function syncCrontab(args: {
   entries: CrontabEntry[]
   wrapperPath: string
   dataDir: string
+  tickCommand?: string | null
   force?: boolean
 }): Promise<SyncResult> {
-  const current = await readCrontab()
-  const ex = extractManaged(current)
-  if (ex.conflict && !args.force) {
-    return { wrote: false, conflict: true, reason: 'managed section damaged or duplicated' }
+  const release = await acquireCrontabLock(args.dataDir)
+  if (!release) {
+    return {
+      wrote: false,
+      conflict: false,
+      reason: 'crontab lock contended (another process is syncing)'
+    }
   }
+  try {
+    const current = await readCrontab()
+    const ex = extractManaged(current)
+    if (ex.conflict && !args.force) {
+      return { wrote: false, conflict: true, reason: 'managed section damaged or duplicated' }
+    }
 
-  const liveEntries = args.entries
-  const baseText = ex.conflict ? purgeAllManaged(current) : current
-  const baseEx = ex.conflict ? extractManaged(baseText) : ex
+    const liveEntries = args.entries
+    const baseText = ex.conflict ? purgeAllManaged(current) : current
+    const baseEx = ex.conflict ? extractManaged(baseText) : ex
 
-  const next = computeNext(baseText, baseEx, liveEntries, args.wrapperPath, args.dataDir)
+    const next = computeNext(
+      baseText,
+      baseEx,
+      liveEntries,
+      args.wrapperPath,
+      args.dataDir,
+      args.tickCommand
+    )
 
-  if (next === current) {
-    return { wrote: false, conflict: false }
+    if (next === current) {
+      return { wrote: false, conflict: false }
+    }
+    await writeCrontab(next)
+    return { wrote: true, conflict: false }
+  } finally {
+    await release()
   }
-  await writeCrontab(next)
-  return { wrote: true, conflict: false }
+}
+
+// Returns a release callback once the lock is held, or null if the wait
+// timeout elapsed (caller treats that as "skip this round, try again later").
+// The lockfile holds the holder's pid for diagnostics. A lockfile older than
+// LOCK_STALE_MS is assumed orphaned (process crashed mid-sync) and force-taken.
+export async function acquireCrontabLock(
+  dataDir: string
+): Promise<(() => Promise<void>) | null> {
+  await fsp.mkdir(dataDir, { recursive: true })
+  const lockPath = join(dataDir, LOCK_FILENAME)
+  const start = Date.now()
+
+  while (true) {
+    try {
+      const handle = await fsp.open(lockPath, 'wx')
+      await handle.writeFile(`${process.pid}\n`)
+      return async () => {
+        await handle.close().catch(() => {})
+        await fsp.unlink(lockPath).catch(() => {})
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      try {
+        const st = await fsp.stat(lockPath)
+        if (Date.now() - st.mtimeMs > LOCK_STALE_MS) {
+          await fsp.unlink(lockPath).catch(() => {})
+          continue
+        }
+      } catch {
+        continue
+      }
+      if (Date.now() - start > LOCK_WAIT_TIMEOUT_MS) return null
+      await new Promise((r) => setTimeout(r, LOCK_POLL_MS))
+    }
+  }
 }
 
 export function purgeAllManaged(text: string): string {
@@ -191,14 +263,17 @@ export function purgeAllManaged(text: string): string {
   return lines.filter((_, idx) => !drop.has(idx)).join('\n')
 }
 
-function computeNext(
+export function computeNext(
   current: string,
   ex: ManagedExtract,
   entries: CrontabEntry[],
   wrapperPath: string,
-  dataDir: string
+  dataDir: string,
+  tickCommand?: string | null
 ): string {
-  if (entries.length === 0) {
+  // The block is "non-empty" if there's a tick command or any agent entries.
+  // Without either, we strip the markers entirely (existing behavior).
+  if (entries.length === 0 && !tickCommand) {
     if (!ex.hasMarkers) return current
     const before = ex.before.replace(/\n+$/, '')
     const after = ex.after.replace(/^\n+/, '')
@@ -207,7 +282,7 @@ function computeNext(
     return `${before}\n${after}`
   }
 
-  const block = buildManagedBlock(entries, wrapperPath, dataDir)
+  const block = buildManagedBlock(entries, wrapperPath, dataDir, tickCommand)
   if (ex.hasMarkers) {
     const before = ex.before.replace(/\n+$/, '')
     const after = ex.after.replace(/^\n+/, '')

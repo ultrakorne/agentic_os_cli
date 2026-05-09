@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect } from 'vitest'
+import { promises as fs } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import {
   BEGIN_MARKER,
   END_MARKER,
+  acquireCrontabLock,
   buildManagedBlock,
+  computeNext,
   extractManaged,
   purgeAllManaged,
   type CrontabEntry
@@ -93,9 +98,32 @@ describe('buildManagedBlock', () => {
     expect(lines[1]).toContain("'ping'")
   })
 
-  it('emits an empty managed block (BEGIN/END only) when no entries', () => {
+  it('emits an empty managed block (BEGIN/END only) when no entries and no tick', () => {
     const block = buildManagedBlock([], '/wrap.sh', '/data')
     expect(block).toBe(`${BEGIN_MARKER}\n${END_MARKER}`)
+  })
+
+  it('prepends a tick line when a tick command is supplied', () => {
+    const block = buildManagedBlock(
+      [entry('ping', '/tmp/ping.sh')],
+      '/wrap.sh',
+      '/data',
+      "PATH=/usr/bin:/bin '/repo/node_modules/.bin/tsx' '/repo/src/cli/tick.ts'"
+    )
+    const lines = block.split('\n')
+    expect(lines[0]).toBe(BEGIN_MARKER)
+    expect(lines[1]).toMatch(/^\*\/10 \* \* \* \* /)
+    expect(lines[1]).toContain('# agentic_os:__tick__')
+    expect(lines[2]).toContain("'ping'")
+    expect(lines[3]).toBe(END_MARKER)
+  })
+
+  it('emits a tick-only block when there are no agent entries', () => {
+    const block = buildManagedBlock([], '/wrap.sh', '/data', '/bin/true')
+    const lines = block.split('\n')
+    expect(lines).toHaveLength(3)
+    expect(lines[1]).toContain('/bin/true')
+    expect(lines[1]).toContain('# agentic_os:__tick__')
   })
 })
 
@@ -151,5 +179,107 @@ describe('purgeAllManaged', () => {
     const text = `# user line\n${BEGIN_MARKER}\nfoo\nbar\n`
     const out = purgeAllManaged(text)
     expect(out).toBe(`# user line\nfoo\nbar\n`)
+  })
+})
+
+describe('computeNext', () => {
+  const TICK = "/bin/echo 'tick'"
+
+  it('returns input unchanged when there are no entries, no tick, and no markers', () => {
+    const text = '0 9 * * 1 echo hi\n'
+    const ex = extractManaged(text)
+    const next = computeNext(text, ex, [], '/wrap.sh', '/data')
+    expect(next).toBe(text)
+  })
+
+  it('strips an existing managed block when there are no entries and no tick', () => {
+    const text = `# user pre\n${BEGIN_MARKER}\nold managed line\n${END_MARKER}\n# user post`
+    const ex = extractManaged(text)
+    const next = computeNext(text, ex, [], '/wrap.sh', '/data')
+    expect(next).not.toContain(BEGIN_MARKER)
+    expect(next).not.toContain('old managed line')
+    expect(next).toContain('# user pre')
+    expect(next).toContain('# user post')
+  })
+
+  it('appends a tick-only block when there is no existing managed section', () => {
+    const text = '0 9 * * 1 echo hi\n'
+    const ex = extractManaged(text)
+    const next = computeNext(text, ex, [], '/wrap.sh', '/data', TICK)
+    expect(next).toContain(BEGIN_MARKER)
+    expect(next).toContain(END_MARKER)
+    expect(next).toContain(TICK)
+    expect(next).toContain('0 9 * * 1 echo hi')
+    expect(next).toContain('agentic_os:__tick__')
+  })
+
+  it('replaces the existing managed block in place when entries change', () => {
+    const text =
+      `# user pre\n${BEGIN_MARKER}\nstale\n${END_MARKER}\n# user post`
+    const ex = extractManaged(text)
+    const entries: CrontabEntry[] = [
+      { agentId: 'foo', scriptPath: '/a/foo.sh', spec: { kind: 'hourly', everyHours: 1, minute: 0 } }
+    ]
+    const next = computeNext(text, ex, entries, '/wrap.sh', '/data', TICK)
+    expect(next.indexOf('# user pre')).toBeLessThan(next.indexOf(BEGIN_MARKER))
+    expect(next.indexOf(END_MARKER)).toBeLessThan(next.indexOf('# user post'))
+    expect(next).not.toContain('stale')
+    expect(next).toContain('agentic_os:foo')
+    expect(next).toContain('agentic_os:__tick__')
+  })
+
+  it('is idempotent: feeding the output back in produces the same text', () => {
+    const text = '0 9 * * 1 user-line\n'
+    const ex = extractManaged(text)
+    const entries: CrontabEntry[] = [
+      { agentId: 'a', scriptPath: '/a.sh', spec: { kind: 'hourly', everyHours: 2, minute: 30 } }
+    ]
+    const once = computeNext(text, ex, entries, '/wrap.sh', '/data', TICK)
+    const twice = computeNext(once, extractManaged(once), entries, '/wrap.sh', '/data', TICK)
+    expect(twice).toBe(once)
+  })
+})
+
+describe('acquireCrontabLock', () => {
+  let dir: string
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(join(tmpdir(), 'agentic-lock-'))
+  })
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true })
+  })
+
+  it('serialises concurrent callers (second waits, then proceeds in order)', async () => {
+    const order: string[] = []
+    const a = acquireCrontabLock(dir).then(async (release) => {
+      if (!release) throw new Error('A failed to acquire')
+      order.push('A acquired')
+      await new Promise((r) => setTimeout(r, 150))
+      order.push('A releasing')
+      await release()
+    })
+    // ensure A wins the race for the lock
+    await new Promise((r) => setTimeout(r, 20))
+    const b = acquireCrontabLock(dir).then(async (release) => {
+      if (!release) throw new Error('B failed to acquire')
+      order.push('B acquired')
+      await release()
+    })
+    await Promise.all([a, b])
+    expect(order).toEqual(['A acquired', 'A releasing', 'B acquired'])
+  })
+
+  it('reclaims a stale lockfile (mtime older than the staleness threshold)', async () => {
+    const lockPath = join(dir, '.crontab.lock')
+    await fs.writeFile(lockPath, '99999\n')
+    // 60s in the past — well over LOCK_STALE_MS (30s)
+    const past = Date.now() - 60_000
+    await fs.utimes(lockPath, past / 1000, past / 1000)
+
+    const release = await acquireCrontabLock(dir)
+    expect(release).not.toBeNull()
+    if (release) await release()
   })
 })

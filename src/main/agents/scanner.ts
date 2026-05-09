@@ -71,6 +71,12 @@ async function collectInto(
     if (!(await isExecutable(fullPath))) continue
 
     const id = basename(name, ext)
+    if (id.startsWith('__')) {
+      console.warn(
+        `[scanner] reserved agent id "${id}" — the __-prefix is for internal markers; ignoring ${fullPath}`
+      )
+      continue
+    }
     const previous = seen.get(id)
     if (previous) {
       console.warn(

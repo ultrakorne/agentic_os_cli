@@ -27,6 +27,14 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+/* light themes need less bg mixed into fg, otherwise dim/faint text washes out */
+:root[data-theme-mode="light"] {
+  --color-fg-dim: color-mix(in oklch, var(--color-fg), var(--color-bg) 20%);
+  --color-fg-faint: color-mix(in oklch, var(--color-fg), var(--color-bg) 40%);
+  --color-rule: color-mix(in oklch, var(--color-fg), var(--color-bg) 55%);
+  --color-rule-bright: color-mix(in oklch, var(--color-fg), var(--color-bg) 40%);
+}
+
 html {
   font-size: 17px;
 }
@@ -146,6 +154,21 @@ body::after {
   background-color: color-mix(in oklch, var(--color-bg), black 40%);
 }
 
+/* on light themes, mixing 22% black with a light bg yields a mid-gray that fights
+   neon text + glow. keep surfaces close to bg so colored text stays legible. */
+:root[data-theme-mode="light"] .bg-card {
+  background-color: color-mix(in oklch, var(--color-bg), black 3%);
+}
+:root[data-theme-mode="light"] .bg-card-2 {
+  background-color: color-mix(in oklch, var(--color-bg), black 7%);
+}
+:root[data-theme-mode="light"] .bg-frame {
+  background-color: color-mix(in oklch, var(--color-bg), black 5%);
+}
+:root[data-theme-mode="light"] .bg-overlay {
+  background-color: color-mix(in oklch, var(--color-bg), black 18%);
+}
+
 /* fonts */
 .font-display {
   font-family: var(--font-display);
@@ -167,6 +190,15 @@ body::after {
   text-shadow:
     0 0 6px color-mix(in oklch, currentColor, transparent 60%),
     0 0 16px color-mix(in oklch, currentColor, transparent 85%);
+}
+/* tighter glow on light themes — wide bloom on a light surface fuzzes the letters */
+:root[data-theme-mode="light"] .neon-text {
+  text-shadow:
+    0 0 3px color-mix(in oklch, currentColor, transparent 55%),
+    0 0 8px color-mix(in oklch, currentColor, transparent 80%);
+}
+:root[data-theme-mode="light"] .neon-text-soft {
+  text-shadow: 0 0 3px color-mix(in oklch, currentColor, transparent 75%);
 }
 .neon-edge {
   box-shadow:

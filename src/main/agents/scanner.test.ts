@@ -116,3 +116,19 @@ describe('scanScripts — section from folder structure', () => {
     expect(scripts).toEqual([])
   })
 })
+
+describe('scanScripts — reserved id namespace', () => {
+  it('drops scripts whose id starts with __ (reserved for internal markers)', async () => {
+    await makeExec(join(dir, '__tick__.sh'))
+    await makeExec(join(dir, '__internal.sh'))
+    await makeExec(join(dir, 'normal.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts.map((s) => s.id)).toEqual(['normal'])
+  })
+
+  it('still allows ids that contain __ but do not start with it', async () => {
+    await makeExec(join(dir, 'foo__bar.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts.map((s) => s.id)).toEqual(['foo__bar'])
+  })
+})

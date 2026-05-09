@@ -1,8 +1,10 @@
 import type { ThemeDef } from '../theme'
+import { catppuccinLatte } from './catppuccin-latte'
 import { gruvbox } from './gruvbox'
+import { nord } from './nord'
 import { tokyonight } from './tokyonight'
 
-export const THEMES: ThemeDef[] = [gruvbox, tokyonight]
+export const THEMES: ThemeDef[] = [gruvbox, tokyonight, nord, catppuccinLatte]
 
 export const DEFAULT_THEME_ID = gruvbox.id
 

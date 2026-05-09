@@ -31,6 +31,7 @@ export type EngineOpts = {
   dataDir: string
   agentsDir: string
   resourcesDir: string
+  tickCommand?: string | null
   onChange?: () => void
 }
 
@@ -248,8 +249,16 @@ export class SchedulerEngine {
     try {
       const data = await fs.readFile(src)
       await fs.mkdir(this.opts.dataDir, { recursive: true })
-      await fs.writeFile(this.wrapperPath, data)
-      await fs.chmod(this.wrapperPath, 0o755)
+      let existing: Buffer | null = null
+      try {
+        existing = await fs.readFile(this.wrapperPath)
+      } catch {
+        /* missing — fall through and install */
+      }
+      if (!existing || !existing.equals(data)) {
+        await fs.writeFile(this.wrapperPath, data)
+        await fs.chmod(this.wrapperPath, 0o755)
+      }
       this.wrapperOk = true
     } catch (err) {
       console.error('[engine] failed to install wrapper:', err)
@@ -286,6 +295,7 @@ export class SchedulerEngine {
         entries,
         wrapperPath: this.wrapperPath,
         dataDir: this.opts.dataDir,
+        tickCommand: this.opts.tickCommand,
         force: opts.force
       })
       this.crontabConflict = result.conflict

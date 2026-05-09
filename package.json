@@ -12,6 +12,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "tick": "tsx src/cli/tick.ts",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
@@ -46,6 +47,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "prettier": "^3.7.4",
     "tailwindcss": "^4.1.16",
+    "tsx": "^4.19.0",
     "typescript": "^5.9.3",
     "vite": "^7.2.6",
     "vitest": "^3.2.4"

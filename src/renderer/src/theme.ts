@@ -32,4 +32,25 @@ export function applyTheme(theme: Theme): void {
   }
   root.dataset.themeId = theme.id
   root.dataset.themeName = theme.name
+  root.dataset.themeMode = isLightHex(theme.colors.bg) ? 'light' : 'dark'
+}
+
+function isLightHex(hex: string): boolean {
+  const trimmed = hex.trim().replace(/^#/, '')
+  const expanded =
+    trimmed.length === 3
+      ? trimmed
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : trimmed
+  if (!/^[0-9a-f]{6}$/i.test(expanded)) {
+    console.warn(`[theme] unparseable bg color "${hex}", defaulting to dark mode`)
+    return false
+  }
+  const n = parseInt(expanded, 16)
+  const r = ((n >> 16) & 0xff) / 255
+  const g = ((n >> 8) & 0xff) / 255
+  const b = (n & 0xff) / 255
+  return 0.299 * r + 0.587 * g + 0.114 * b > 0.5
 }
