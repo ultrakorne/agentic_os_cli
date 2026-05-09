@@ -71,16 +71,19 @@ in `<userData>/data/agents.json`, not next to the script:
       "id": "morning-digest",
       "title": "Morning digest",
       "description": "Summarize overnight notifications.",
-      "schedule": { "kind": "daily", "days": ["mon","tue","wed","thu","fri"], "hour": 9, "minute": 0 }
+      "schedule": { "kind": "daily", "days": ["mon","tue","wed","thu","fri"], "hour": 9, "minute": 0 },
+      "scheduledAt": "2026-05-09T08:30:00.000Z"
     }
   ]
 }
 ```
 
 Title and description are optional; missing values are derived from the
-filename. The dashboard rewrites `agents.json` whenever you change a
-schedule. Section comes from the script's parent folder, not from this
-file.
+filename. Description is editable directly from the agent detail panel
+(click any card). `scheduledAt` is set whenever the schedule changes and
+is used to suppress retroactive missed-run reports for ticks that
+predate the current schedule. Section comes from the script's parent
+folder, not from this file.
 
 ## Adding an agent
 

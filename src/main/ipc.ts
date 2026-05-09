@@ -9,6 +9,7 @@ export const IPC = {
   agentsRescan: 'agents:rescan',
   agentsRevealDir: 'agents:reveal-dir',
   agentsSetSchedule: 'agents:set-schedule',
+  agentsSetDescription: 'agents:set-description',
   schedListRuns: 'scheduler:list-runs',
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
@@ -38,6 +39,10 @@ export function registerIpc(
   ipcMain.handle(
     IPC.agentsSetSchedule,
     (_e, agentId: string, spec: ScheduleSpec | null) => engine.setSchedule(agentId, spec)
+  )
+  ipcMain.handle(
+    IPC.agentsSetDescription,
+    (_e, agentId: string, description: string) => engine.setDescription(agentId, description)
   )
 
   ipcMain.handle(IPC.schedListRuns, (_e, jobId?: string) => engine.listRuns(jobId))

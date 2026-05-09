@@ -125,6 +125,7 @@ export class SchedulerEngine {
       section: 'Agents', // overridden when a matching script is merged in
       scriptPath: undefined,
       schedule: cfg.schedule,
+      scheduledAt: cfg.scheduledAt,
       scheduled: !!cfg.schedule,
       orphaned: !!cfg.schedule
     }
@@ -133,6 +134,15 @@ export class SchedulerEngine {
   async setSchedule(agentId: string, schedule: ScheduleSpec | null): Promise<void> {
     await this.opts.configs.setSchedule(agentId, schedule)
     await this.runSync()
+    // Recompute missed runs immediately so the dashboard reflects the new
+    // schedule without waiting for the next 5-minute sweep. We suppress the
+    // sweep's own notify so the renderer sees a single coalesced update.
+    await this.runSweep({ notify: false })
+    this.opts.onChange?.()
+  }
+
+  async setDescription(agentId: string, description: string): Promise<void> {
+    await this.opts.configs.setDescription(agentId, description)
     this.opts.onChange?.()
   }
 
@@ -310,13 +320,13 @@ export class SchedulerEngine {
     }
   }
 
-  async runSweep(): Promise<void> {
+  async runSweep({ notify = true }: { notify?: boolean } = {}): Promise<void> {
     const agents = this.listAgents()
     const runs = this.opts.runs.list(undefined, 1000)
     const next = detectMissed(agents, runs)
     if (!missedEqual(this.missed, next)) {
       this.missed = next
-      this.opts.onChange?.()
+      if (notify) this.opts.onChange?.()
     }
   }
 }

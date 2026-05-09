@@ -106,6 +106,18 @@ describe('detectMissed', () => {
     expect(missed).toEqual([])
   })
 
+  it('does not flag ticks from before scheduledAt', () => {
+    const now = new Date('2026-05-09T05:30:00Z')
+    const agent: Agent = {
+      ...hourlyAgent('ping'),
+      // schedule was created at 04:30 — only 05:00 should be considered
+      scheduledAt: '2026-05-09T04:30:00Z'
+    }
+    const missed = detectMissed([agent], [], { now, windowMs: 6 * 3600_000 })
+    const times = missed.map((m) => m.expectedAt)
+    expect(times).toEqual(['2026-05-09T05:00:00.000Z'])
+  })
+
   it('returns missed runs sorted newest first', () => {
     const now = new Date('2026-05-09T05:30:00Z')
     const agent = hourlyAgent('ping')

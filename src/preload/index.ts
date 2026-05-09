@@ -14,6 +14,7 @@ const C = {
   agentsRescan: 'agents:rescan',
   agentsRevealDir: 'agents:reveal-dir',
   agentsSetSchedule: 'agents:set-schedule',
+  agentsSetDescription: 'agents:set-description',
   schedListRuns: 'scheduler:list-runs',
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
@@ -34,7 +35,9 @@ const api = {
     rescan: (): Promise<Agent[]> => ipcRenderer.invoke(C.agentsRescan),
     revealDir: (): Promise<string> => ipcRenderer.invoke(C.agentsRevealDir),
     setSchedule: (agentId: string, spec: ScheduleSpec | null): Promise<void> =>
-      ipcRenderer.invoke(C.agentsSetSchedule, agentId, spec)
+      ipcRenderer.invoke(C.agentsSetSchedule, agentId, spec),
+    setDescription: (agentId: string, description: string): Promise<void> =>
+      ipcRenderer.invoke(C.agentsSetDescription, agentId, description)
   },
   scheduler: {
     listRuns: (jobId?: string): Promise<JobRun[]> => ipcRenderer.invoke(C.schedListRuns, jobId),

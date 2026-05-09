@@ -36,8 +36,18 @@ export function detectMissed(
       continue
     }
 
+    // Don't report misses for ticks that occurred before this schedule was set
+    // (e.g. just after the user created or changed the schedule). Without this,
+    // a brand-new schedule would retroactively flag every cron tick in the
+    // last 24 h.
+    const scheduledAtMs = agent.scheduledAt
+      ? new Date(agent.scheduledAt).getTime()
+      : null
+    const earliestMs =
+      scheduledAtMs != null ? Math.max(cutoff, scheduledAtMs) : cutoff
+
     const expected: Date[] = []
-    let cursor = new Date(cutoff - 1)
+    let cursor = new Date(earliestMs - 1)
     let i = 0
     while (i < maxTicks) {
       const next: Date | null = cron.nextRun(cursor)

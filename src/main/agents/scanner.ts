@@ -55,7 +55,6 @@ async function collectInto(
   for (const name of entries) {
     if (name.startsWith('.')) continue
     if (name.toLowerCase() === 'readme.md') continue
-    if (name.endsWith('.meta.json')) continue
 
     const ext = extname(name)
     if (!SUPPORTED_EXTS.has(ext)) continue

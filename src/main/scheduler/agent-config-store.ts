@@ -15,6 +15,18 @@ export class AgentConfigStore {
     this.configs = await readJson<ConfigsFile>(this.path, { agents: [] }).then(
       (d) => d.agents ?? []
     )
+    // Migration: backfill `scheduledAt` for any pre-existing schedule that
+    // lacks one, so missed-runs detection doesn't retroactively flag ticks
+    // from before this field existed.
+    const nowIso = new Date().toISOString()
+    let migrated = false
+    for (const cfg of this.configs) {
+      if (cfg.schedule && !cfg.scheduledAt) {
+        cfg.scheduledAt = nowIso
+        migrated = true
+      }
+    }
+    if (migrated) await this.persist()
   }
 
   list(): AgentConfig[] {
@@ -46,14 +58,30 @@ export class AgentConfigStore {
       if (idx >= 0) {
         const cur = this.configs[idx]
         if (schedule == null) {
-          const { schedule: _drop, ...rest } = cur
-          void _drop
+          const { schedule: _s, scheduledAt: _t, ...rest } = cur
+          void _s
+          void _t
           this.configs[idx] = rest
         } else {
-          this.configs[idx] = { ...cur, schedule }
+          const specChanged = !specsEqual(cur.schedule, schedule)
+          const scheduledAt = specChanged
+            ? new Date().toISOString()
+            : (cur.scheduledAt ?? new Date().toISOString())
+          this.configs[idx] = { ...cur, schedule, scheduledAt }
         }
       } else if (schedule != null) {
-        this.configs.push({ id, schedule })
+        this.configs.push({ id, schedule, scheduledAt: new Date().toISOString() })
+      }
+    })
+  }
+
+  setDescription(id: string, description: string): Promise<void> {
+    return this.enqueue(() => {
+      const idx = this.configs.findIndex((c) => c.id === id)
+      if (idx >= 0) {
+        this.configs[idx] = { ...this.configs[idx], description }
+      } else {
+        this.configs.push({ id, description })
       }
     })
   }
@@ -85,4 +113,27 @@ async function writeJson(path: string, data: unknown): Promise<void> {
   const tmp = `${path}.tmp`
   await fs.writeFile(tmp, JSON.stringify(data, null, 2))
   await fs.rename(tmp, path)
+}
+
+function specsEqual(a: ScheduleSpec | undefined, b: ScheduleSpec | undefined): boolean {
+  if (!a || !b) return a === b
+  if (a.kind !== b.kind) return false
+  switch (a.kind) {
+    case 'hourly': {
+      if (b.kind !== 'hourly') return false
+      return a.everyHours === b.everyHours && a.minute === b.minute
+    }
+    case 'daily': {
+      if (b.kind !== 'daily') return false
+      if (a.hour !== b.hour || a.minute !== b.minute) return false
+      if (a.days.length !== b.days.length) return false
+      const set = new Set(a.days)
+      return b.days.every((d) => set.has(d))
+    }
+    default: {
+      const _exhaustive: never = a
+      void _exhaustive
+      return false
+    }
+  }
 }

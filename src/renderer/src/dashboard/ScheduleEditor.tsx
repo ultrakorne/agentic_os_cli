@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState, type CSSProperties, type JSX } from 'react'
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { Agent, ScheduleSpec, Weekday } from '@shared/scheduler'
 import { formatClock, relativeFromNow } from '../lib/format'
+import { CornerBrackets } from './CornerBrackets'
+import { glowFrame } from './styles'
 
 type Mode = 'hourly' | 'daily'
 
@@ -16,11 +18,13 @@ const DAYS: { key: Weekday; label: string }[] = [
 
 type Props = {
   agent: Agent
-  onClose: () => void
+  embedded?: boolean
 }
 
+const AUTOSAVE_DEBOUNCE_MS = 1000
+
 function initial(spec: ScheduleSpec | undefined): {
-  mode: Mode
+  mode: Mode | null
   hourly: { everyHours: number; minute: number }
   daily: { days: Weekday[]; hour: number; minute: number }
 } {
@@ -39,25 +43,36 @@ function initial(spec: ScheduleSpec | undefined): {
     }
   }
   return {
-    mode: 'daily',
+    mode: null,
     hourly: { everyHours: 1, minute: 0 },
     daily: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], hour: 9, minute: 0 }
   }
 }
 
-const frameStyle: CSSProperties = {
-  ['--glow' as never]: 'var(--color-hot)'
-}
-
-export function ScheduleEditor({ agent, onClose }: Props): JSX.Element {
+export function ScheduleEditor({ agent, embedded = false }: Props): JSX.Element {
   const seed = useMemo(() => initial(agent.schedule), [agent.schedule])
-  const [mode, setMode] = useState<Mode>(seed.mode)
-  const [hourly, setHourly] = useState(seed.hourly)
-  const [daily, setDaily] = useState(seed.daily)
-  const [busy, setBusy] = useState(false)
+  const [mode, setModeRaw] = useState<Mode | null>(seed.mode)
+  const [hourly, setHourlyRaw] = useState(seed.hourly)
+  const [daily, setDailyRaw] = useState(seed.daily)
   const [nextIso, setNextIso] = useState<string | null>(null)
+  const editTokenRef = useRef(0)
+  const lastSavedTokenRef = useRef(0)
+
+  const setMode: typeof setModeRaw = (m) => {
+    editTokenRef.current += 1
+    setModeRaw(m)
+  }
+  const setHourly: typeof setHourlyRaw = (u) => {
+    editTokenRef.current += 1
+    setHourlyRaw(u)
+  }
+  const setDaily: typeof setDailyRaw = (u) => {
+    editTokenRef.current += 1
+    setDailyRaw(u)
+  }
 
   const spec: ScheduleSpec | null = useMemo(() => {
+    if (mode === null) return null
     if (mode === 'hourly') {
       return { kind: 'hourly', everyHours: hourly.everyHours, minute: hourly.minute }
     }
@@ -79,6 +94,38 @@ export function ScheduleEditor({ agent, onClose }: Props): JSX.Element {
     }
   }, [spec])
 
+  const pendingFlushRef = useRef<{ spec: ScheduleSpec | null } | null>(null)
+
+  // Auto-save on edit. Skips renders that weren't triggered by user input
+  // (e.g. when the panel re-renders due to an external schedule change).
+  useEffect(() => {
+    if (editTokenRef.current === lastSavedTokenRef.current) {
+      pendingFlushRef.current = null
+      return
+    }
+    const myToken = editTokenRef.current
+    pendingFlushRef.current = { spec }
+    const t = setTimeout(() => {
+      pendingFlushRef.current = null
+      void window.api.agents.setSchedule(agent.id, spec).then(() => {
+        lastSavedTokenRef.current = myToken
+      })
+    }, AUTOSAVE_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [spec, agent.id])
+
+  // Flush a pending save if the user closes the panel mid-edit.
+  useEffect(() => {
+    const id = agent.id
+    return () => {
+      const pending = pendingFlushRef.current
+      if (pending) {
+        void window.api.agents.setSchedule(id, pending.spec)
+        pendingFlushRef.current = null
+      }
+    }
+  }, [agent.id])
+
   const toggleDay = (day: Weekday): void => {
     setDaily((d) =>
       d.days.includes(day)
@@ -87,161 +134,100 @@ export function ScheduleEditor({ agent, onClose }: Props): JSX.Element {
     )
   }
 
-  const save = async (): Promise<void> => {
-    if (!spec) return
-    setBusy(true)
-    try {
-      await window.api.agents.setSchedule(agent.id, spec)
-      onClose()
-    } finally {
-      setBusy(false)
-    }
-  }
+  const inner = (
+    <>
+      {!embedded && (
+        <div className="flex items-baseline gap-3 border-b border-[var(--color-rule)] pb-3">
+          <span
+            className="font-display text-[15px] font-bold uppercase text-[var(--color-hot)] neon-text"
+            style={{ letterSpacing: '0.28em' }}
+          >
+            schedule
+          </span>
+          <span className="text-[var(--color-rule-bright)]">/</span>
+          <span
+            className="font-display text-[13px] font-bold uppercase text-[var(--color-fg)]"
+            style={{ letterSpacing: '0.18em' }}
+          >
+            {agent.id}
+          </span>
+          <span
+            className="ml-auto font-display text-[10px] uppercase text-[var(--color-fg-faint)]"
+            style={{ letterSpacing: '0.24em' }}
+          >
+            esc to close
+          </span>
+        </div>
+      )}
 
-  const clear = async (): Promise<void> => {
-    setBusy(true)
-    try {
-      await window.api.agents.setSchedule(agent.id, null)
-      onClose()
-    } finally {
-      setBusy(false)
-    }
+      {mode === null ? (
+        <div className={`${embedded ? '' : 'mt-4'} flex flex-col gap-3`}>
+          <ModeToggle mode={mode} onChange={setMode} />
+          <p
+            className="font-display text-[10px] uppercase text-[var(--color-fg-faint)]"
+            style={{ letterSpacing: '0.22em' }}
+          >
+            {'// click hourly or daily to enable a schedule'}
+          </p>
+        </div>
+      ) : (
+        <div
+          className={`${embedded ? '' : 'mt-4'} grid grid-cols-1 gap-5 md:grid-cols-[auto_1fr_auto] md:items-start`}
+        >
+          <ModeToggle mode={mode} onChange={setMode} />
+
+          <div className="min-w-0">
+            {mode === 'hourly' ? (
+              <HourlyControls
+                everyHours={hourly.everyHours}
+                minute={hourly.minute}
+                onEveryHours={(everyHours) => setHourly((h) => ({ ...h, everyHours }))}
+                onMinute={(minute) => setHourly((h) => ({ ...h, minute }))}
+              />
+            ) : (
+              <DailyControls
+                days={daily.days}
+                hour={daily.hour}
+                minute={daily.minute}
+                onToggleDay={toggleDay}
+                onTime={(hour, minute) => setDaily((d) => ({ ...d, hour, minute }))}
+              />
+            )}
+          </div>
+
+          <div className="flex flex-col items-start gap-1 md:items-end">
+            <span
+              className="font-display text-[10px] uppercase text-[var(--color-fg-faint)]"
+              style={{ letterSpacing: '0.24em' }}
+            >
+              next run
+            </span>
+            <span className="font-display text-[15px] font-bold tabular text-[var(--color-cool)] neon-text">
+              {spec ? (nextIso ? formatClock(nextIso) : '…') : 'pick a day'}
+            </span>
+            {spec && nextIso && (
+              <span className="tabular text-[var(--color-fg-dim)]">
+                {relativeFromNow(nextIso)}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )
+
+  if (embedded) {
+    return <div className="text-xs">{inner}</div>
   }
 
   return (
     <div
       className="bg-card-2 neon-edge-strong relative p-5 text-xs"
-      style={frameStyle}
+      style={glowFrame('var(--color-hot)')}
     >
       <CornerBrackets />
-
-      {/* header */}
-      <div className="flex items-baseline gap-3 border-b border-[var(--color-rule)] pb-3">
-        <span
-          className="font-display text-[15px] font-bold uppercase text-[var(--color-hot)] neon-text"
-          style={{ letterSpacing: '0.28em' }}
-        >
-          schedule
-        </span>
-        <span className="text-[var(--color-rule-bright)]">/</span>
-        <span
-          className="font-display text-[13px] font-bold uppercase text-[var(--color-fg)]"
-          style={{ letterSpacing: '0.18em' }}
-        >
-          {agent.id}
-        </span>
-        <span
-          className="ml-auto font-display text-[10px] uppercase text-[var(--color-fg-faint)]"
-          style={{ letterSpacing: '0.24em' }}
-        >
-          esc to close
-        </span>
-      </div>
-
-      {/* body */}
-      <div className="mt-4 grid grid-cols-1 gap-5 md:grid-cols-[auto_1fr_auto] md:items-start">
-        <ModeToggle mode={mode} onChange={setMode} />
-
-        <div className="min-w-0">
-          {mode === 'hourly' ? (
-            <HourlyControls
-              everyHours={hourly.everyHours}
-              minute={hourly.minute}
-              onEveryHours={(everyHours) => setHourly((h) => ({ ...h, everyHours }))}
-              onMinute={(minute) => setHourly((h) => ({ ...h, minute }))}
-            />
-          ) : (
-            <DailyControls
-              days={daily.days}
-              hour={daily.hour}
-              minute={daily.minute}
-              onToggleDay={toggleDay}
-              onTime={(hour, minute) => setDaily((d) => ({ ...d, hour, minute }))}
-            />
-          )}
-        </div>
-
-        <div className="flex flex-col items-start gap-1 md:items-end">
-          <span
-            className="font-display text-[10px] uppercase text-[var(--color-fg-faint)]"
-            style={{ letterSpacing: '0.24em' }}
-          >
-            next run
-          </span>
-          <span className="font-display text-[15px] font-bold tabular text-[var(--color-cool)] neon-text">
-            {spec ? (nextIso ? formatClock(nextIso) : '…') : 'pick a day'}
-          </span>
-          {spec && nextIso && (
-            <span className="tabular text-[var(--color-fg-dim)]">
-              {relativeFromNow(nextIso)}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* actions */}
-      <div className="mt-5 flex items-center gap-3 border-t border-[var(--color-rule)] pt-4">
-        <ArcadeButton tone="hot" onClick={save} disabled={busy || !spec}>
-          ▶ save
-        </ArcadeButton>
-
-        <ArcadeButton tone="ghost" onClick={onClose} disabled={busy}>
-          cancel
-        </ArcadeButton>
-
-        {agent.schedule && (
-          <span className="ml-auto">
-            <ArcadeButton tone="danger" onClick={clear} disabled={busy}>
-              clear
-            </ArcadeButton>
-          </span>
-        )}
-      </div>
+      {inner}
     </div>
-  )
-}
-
-function CornerBrackets(): JSX.Element {
-  const base = 'pointer-events-none absolute size-3 border-[var(--glow)]'
-  return (
-    <>
-      <span className={`${base} left-0 top-0 border-l border-t`} />
-      <span className={`${base} right-0 top-0 border-r border-t`} />
-      <span className={`${base} bottom-0 left-0 border-b border-l`} />
-      <span className={`${base} bottom-0 right-0 border-b border-r`} />
-    </>
-  )
-}
-
-function ArcadeButton({
-  tone,
-  onClick,
-  disabled,
-  children
-}: {
-  tone: 'hot' | 'ghost' | 'danger'
-  onClick: () => void
-  disabled?: boolean
-  children: React.ReactNode
-}): JSX.Element {
-  const palette: Record<typeof tone, string> = {
-    hot:
-      'border-[var(--color-hot)] text-[var(--color-hot)] hover:bg-[var(--color-hot)] hover:text-[var(--color-bg)] hover:shadow-[0_0_20px_-2px_var(--color-hot)]',
-    ghost:
-      'border-[var(--color-rule-bright)] text-[var(--color-fg-dim)] hover:border-[var(--color-cool)] hover:text-[var(--color-cool)]',
-    danger:
-      'border-[var(--color-rule-bright)] text-[var(--color-fg-dim)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)] hover:shadow-[0_0_18px_-4px_var(--color-danger)]'
-  }
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex items-center gap-1 border px-3 py-1.5 font-display text-[10px] font-bold uppercase transition-all active:translate-y-px disabled:opacity-40 disabled:active:translate-y-0 ${palette[tone]}`}
-      style={{ letterSpacing: '0.24em' }}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -249,8 +235,8 @@ function ModeToggle({
   mode,
   onChange
 }: {
-  mode: Mode
-  onChange: (m: Mode) => void
+  mode: Mode | null
+  onChange: (m: Mode | null) => void
 }): JSX.Element {
   return (
     <div className="inline-flex">
@@ -260,7 +246,9 @@ function ModeToggle({
           <button
             key={m}
             type="button"
-            onClick={() => onChange(m)}
+            onClick={() => onChange(active ? null : m)}
+            aria-pressed={active}
+            title={active ? `click to unschedule` : `set ${m} schedule`}
             className={`border px-3 py-1.5 font-display text-[10px] font-bold uppercase transition-all ${
               i === 0 ? '' : '-ml-px'
             } ${

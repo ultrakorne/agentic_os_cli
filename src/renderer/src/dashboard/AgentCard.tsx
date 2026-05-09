@@ -1,6 +1,8 @@
-import { useEffect, useState, type CSSProperties, type JSX } from 'react'
+import { useEffect, useState, type JSX } from 'react'
 import type { Agent, JobRun } from '@shared/scheduler'
 import { describeSchedule, relativeFromNow } from '../lib/format'
+import { CornerBrackets } from './CornerBrackets'
+import { glowFrame } from './styles'
 
 type Props = {
   agent: Agent
@@ -64,20 +66,16 @@ export function AgentCard({
   const live = status === 'running' || running
   const glow = pickGlow(status, !!schedule, selected, live)
 
-  const cardStyle: CSSProperties = {
-    ['--glow' as never]: `var(${glow})`
-  }
-
   return (
     <button
       type="button"
       onClick={onSelect}
-      style={cardStyle}
+      style={glowFrame(`var(${glow})`)}
       data-selected={selected}
       className="bg-card card-frame group relative flex h-full flex-col gap-3 p-4 text-left transition-transform duration-150 hover:-translate-y-0.5"
     >
       {/* corner brackets — arcade frame */}
-      <CornerBrackets />
+      <CornerBrackets subtle />
 
       {/* live scanline only when running */}
       {live && <span className="scanline-host pointer-events-none absolute inset-0" />}
@@ -175,19 +173,6 @@ function pickGlow(
   if (status === 'success') return '--color-success'
   if (scheduled) return '--color-cool'
   return '--color-rule-bright'
-}
-
-function CornerBrackets(): JSX.Element {
-  const base =
-    'pointer-events-none absolute size-2.5 border-[var(--glow)] opacity-80 transition-opacity group-hover:opacity-100'
-  return (
-    <>
-      <span className={`${base} left-0 top-0 border-l border-t`} />
-      <span className={`${base} right-0 top-0 border-r border-t`} />
-      <span className={`${base} bottom-0 left-0 border-b border-l`} />
-      <span className={`${base} bottom-0 right-0 border-b border-r`} />
-    </>
-  )
 }
 
 function RunButton({

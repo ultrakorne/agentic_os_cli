@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type JSX, type ReactNode } from 'react'
 import { SECTION_ORDER, useApp } from '../store'
 import { Section } from './Section'
 import { AgentCard } from './AgentCard'
-import { ScheduleEditor } from './ScheduleEditor'
+import { AgentDetail } from './AgentDetail'
 import { SystemBanner } from './SystemBanner'
 import { MissedRunsBanner } from './MissedRunsBanner'
 
@@ -92,10 +92,7 @@ export function Dashboard(): JSX.Element {
 
       {selectedAgent && (
         <EditorOverlay onClose={() => setSelectedId(null)}>
-          <ScheduleEditor
-            agent={selectedAgent}
-            onClose={() => setSelectedId(null)}
-          />
+          <AgentDetail agent={selectedAgent} onClose={() => setSelectedId(null)} />
         </EditorOverlay>
       )}
     </main>
@@ -152,7 +149,7 @@ function EditorOverlay({
 }): JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape' && !e.defaultPrevented) onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -160,12 +157,12 @@ function EditorOverlay({
 
   return (
     <div
-      className="bg-overlay fixed inset-0 z-50 grid place-items-center px-4 py-10 backdrop-blur-sm"
+      className="bg-overlay fixed inset-0 z-50 flex justify-center items-start overflow-y-auto px-4 pb-16 pt-20 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl"
+        className="w-[min(96vw,1300px)]"
       >
         {children}
       </div>

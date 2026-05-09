@@ -7,6 +7,7 @@ export type ScheduleSpec =
 export type AgentConfig = {
   id: string
   schedule?: ScheduleSpec
+  scheduledAt?: string
   title?: string
   description?: string
 }
@@ -35,6 +36,7 @@ export type Agent = {
   section: string
   scriptPath?: string
   schedule?: ScheduleSpec
+  scheduledAt?: string
   scheduled: boolean
   orphaned: boolean
 }

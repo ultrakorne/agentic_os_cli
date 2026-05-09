@@ -61,7 +61,7 @@ function TopBar({
   agentCount: number
 }): JSX.Element {
   return (
-    <header className="bg-frame relative z-10 flex items-center gap-5 border-b border-[var(--color-rule-bright)] px-5 py-3">
+    <header className="bg-frame relative z-[60] flex items-center gap-5 border-b border-[var(--color-rule-bright)] px-5 py-3">
       <div className="flex items-baseline gap-2">
         <span
           className="font-display text-[18px] font-extrabold uppercase text-[var(--color-hot)] neon-text"
@@ -200,7 +200,7 @@ function BottomBar({
 }): JSX.Element {
   const hot = running > 0
   return (
-    <footer className="bg-frame relative z-10 flex items-center gap-4 border-t border-[var(--color-rule-bright)] px-5 py-2 text-[11px]">
+    <footer className="bg-frame relative z-[60] flex items-center gap-4 border-t border-[var(--color-rule-bright)] px-5 py-2 text-[11px]">
       <span
         className={`flex items-center gap-2 font-display uppercase ${
           hot ? 'text-[var(--color-cool)] neon-text-soft' : 'text-[var(--color-fg-dim)]'

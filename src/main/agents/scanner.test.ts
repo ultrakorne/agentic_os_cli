@@ -48,11 +48,10 @@ describe('scanScripts — extension policy', () => {
     expect(scripts).toEqual([])
   })
 
-  it('skips dotfiles, README, and *.meta.json siblings', async () => {
+  it('skips dotfiles and README siblings', async () => {
     await makeExec(join(dir, 'foo.sh'))
     await makeExec(join(dir, '.hidden.sh'))
     await fs.writeFile(join(dir, 'README.md'), '# notes')
-    await fs.writeFile(join(dir, 'foo.meta.json'), '{"title":"Foo"}')
     const scripts = await scanScripts(dir)
     expect(scripts.map((s) => s.id)).toEqual(['foo'])
   })

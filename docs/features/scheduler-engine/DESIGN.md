@@ -13,7 +13,7 @@ This shape gets us three properties cleanly: (1) schedules fire even when the ap
 Two halves: a script on disk + an optional config entry.
 
 - **Script:** any executable shell file at `<userData>/data/agents/<id>.<ext>` (top-level → section "Agents") or `<userData>/data/agents/<Section>/<id>.<ext>` (first-level subdirectory name = section). Filename without extension is the agent id; ids must be unique across the whole tree.
-- **Config:** an entry in `<userData>/data/agents.json` keyed by id, holding any combination of `schedule`, `title`, `description`. None of the fields are required — the dashboard only writes a config entry when the user gives the agent a schedule (or a future feature edits its metadata). Section is **never** in the config: it always comes from the script's parent folder.
+- **Config:** an entry in `<userData>/data/agents.json` keyed by id, holding any combination of `schedule`, `scheduledAt`, `title`, `description`. None of the fields are required — the dashboard writes a config entry when the user gives the agent a schedule or edits its description. `scheduledAt` (ISO timestamp) is automatically set whenever the schedule changes; missed-run detection ignores expected ticks before this point so newly-set schedules don't backfill historical misses. Section is **never** in the config: it always comes from the script's parent folder.
 
 The two halves are joined into a unified `Agent` view inside the engine. An agent that has a script but no config entry shows on the dashboard with default title / description / no schedule. An agent that has a config entry but no matching script is `orphaned: true` and skipped by crontab sync.
 
