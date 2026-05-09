@@ -1,0 +1,31 @@
+node_modules
+dist
+out
+release
+
+# TypeScript incremental builds
+*.tsbuildinfo
+
+# Test/coverage output
+coverage
+
+# Local overrides (Vite convention) and env files
+*.local
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+
+# Tool caches and logs
+.eslintcache
+*.log*
+
+# Local-only configs
+.claude/settings.local.json
+.mcp.json
+opencode.jsonc

@@ -1,0 +1,23 @@
+stateDiagram-v2
+    [*] --> Idle
+
+    Idle --> Running: cron tick
+    Idle --> Running: manual click
+    Running --> Success: agent exits 0
+    Running --> Error: agent exits non-zero
+
+    Success --> [*]: <run-id>.json status=success
+    Error --> [*]: <run-id>.json status=error
+
+    note right of Running
+        wrapper.sh writes
+        <run-id>.json (status=running)
+        as the first action.
+        fs.watch debounce → IPC change.
+    end note
+
+    note left of Idle
+        Missed-run sweep every 5 min:
+        expected ticks - actual runs
+        → MissedRun[] (no auto-fire)
+    end note
