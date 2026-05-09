@@ -182,6 +182,17 @@ body::after {
     inset 0 0 32px -12px color-mix(in oklch, var(--glow, var(--color-hot)), transparent 40%);
 }
 
+/* flat panel frame — used by agent cards. state lives in glyphs and inverse-video, not halos. */
+.card-frame {
+  border: 1px solid var(--color-rule);
+}
+.card-frame:hover {
+  border-color: var(--color-rule-bright);
+}
+.card-frame[data-selected="true"] {
+  border-color: var(--color-rule-bright);
+}
+
 /* animations */
 @keyframes pulse-soft {
   0%,

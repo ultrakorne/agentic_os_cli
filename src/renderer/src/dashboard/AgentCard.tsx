@@ -73,9 +73,8 @@ export function AgentCard({
       type="button"
       onClick={onSelect}
       style={cardStyle}
-      className={`bg-card group relative flex h-full flex-col gap-3 p-4 text-left transition-transform duration-150 hover:-translate-y-0.5 ${
-        selected ? 'neon-edge-strong' : 'neon-edge hover:neon-edge-strong'
-      }`}
+      data-selected={selected}
+      className="bg-card card-frame group relative flex h-full flex-col gap-3 p-4 text-left transition-transform duration-150 hover:-translate-y-0.5"
     >
       {/* corner brackets — arcade frame */}
       <CornerBrackets />
@@ -88,7 +87,11 @@ export function AgentCard({
         <StatusGlyph status={status} scheduled={!!schedule} live={live} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span
-            className="font-display truncate text-[13px] font-bold uppercase text-[var(--color-fg)]"
+            className={`font-display truncate text-[13px] font-bold uppercase ${
+              selected
+                ? 'self-start bg-[var(--color-hot)] px-1.5 text-[var(--color-bg)]'
+                : 'text-[var(--color-fg)]'
+            }`}
             style={{ letterSpacing: '0.14em' }}
           >
             {agent.id}
