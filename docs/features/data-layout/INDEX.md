@@ -4,6 +4,7 @@ The on-disk shape of the app's state, all under `<userData>/data/`:
 
 - `agents.json` — agent config: id + optional schedule + optional title/description
 - `agents/` — user-owned executable shell scripts; section determined by parent folder
+- `workspaces/` — optional per-agent working dirs (prompts, state, caches); referenced by scripts via `$AGENTIC_OS_DATA_DIR/workspaces/<name>`
 - `runs/` — one pair of `<run-id>.{json,out}` per run
 - `wrapper.sh` — refreshed from the bundled resource on every app start
 

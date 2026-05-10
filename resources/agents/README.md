@@ -44,6 +44,33 @@ Deeper nesting (`agents/Daily/sub/foo.sh`) is ignored.
   user's environment through unchanged, but cron itself starts with very
   little of it.
 
+## Wrapper environment
+
+The wrapper exports a small set of env vars before invoking your script,
+so you can write portable paths that work the same on Linux and macOS:
+
+| Variable | Value |
+|---|---|
+| `AGENTIC_OS_DATA_DIR` | The data root (`<userData>/data`) |
+| `AGENTIC_OS_AGENT_ID` | Id of the agent being run |
+| `AGENTIC_OS_AGENT_SCRIPT` | Absolute path to the script being run |
+| `AGENTIC_OS_RUN_ID` | Run id (matches the `runs/<id>.{json,out}` filenames) |
+| `AGENTIC_OS_TRIGGER` | `schedule` or `manual` |
+
+Use them with a fallback so the script is also runnable by hand:
+
+```bash
+DATA_DIR="${AGENTIC_OS_DATA_DIR:-$HOME/.config/agentic-os/data}"
+WORKDIR="$DATA_DIR/workspaces/my_agent"
+```
+
+## Workspaces (optional)
+
+If an agent needs a working directory — prompt files, state it reads/writes,
+caches — drop a folder under `<userData>/data/workspaces/<name>/` and
+reference it via `$AGENTIC_OS_DATA_DIR/workspaces/<name>`. Many agents
+don't need one; skip it when you don't.
+
 ## Non-shell agents
 
 To run a Python / Node / Ruby / etc. script, drop a thin shell wrapper here

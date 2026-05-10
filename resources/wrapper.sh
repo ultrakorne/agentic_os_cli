@@ -39,6 +39,15 @@ mkdir -p "$RUNS_DIR"
 META="$RUNS_DIR/$RUN_ID.json"
 OUT="$RUNS_DIR/$RUN_ID.out"
 
+# Expose context to the child script so user agents can write portable
+# paths like "$AGENTIC_OS_DATA_DIR/workspaces/foo" instead of hard-coding
+# the platform-specific userData root.
+export AGENTIC_OS_DATA_DIR="$DATA_DIR"
+export AGENTIC_OS_AGENT_ID="$AGENT_ID"
+export AGENTIC_OS_AGENT_SCRIPT="$SCRIPT"
+export AGENTIC_OS_RUN_ID="$RUN_ID"
+export AGENTIC_OS_TRIGGER="$TRIGGER"
+
 iso_now() {
   # millisecond ISO-8601 UTC; macOS `date` lacks %3N so use python
   python3 -c 'import datetime,sys; sys.stdout.write(datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00","Z"))'

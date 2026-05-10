@@ -89,6 +89,15 @@ Combined stdout+stderr from the agent. Written incrementally by shell redirectio
 
 Copied from `resources/wrapper.sh` into `<dataDir>/wrapper.sh` on every engine start, then `chmod 755`. The on-disk path is what the managed crontab section references.
 
+### `<dataDir>/workspaces/`
+
+Optional. Free-form per-agent working directories — prompt files, state an
+agent reads or writes, caches, anything an agent needs that isn't part of
+the script itself. Not scanned, not seeded, never required. Agents
+reference workspaces via the `$AGENTIC_OS_DATA_DIR/workspaces/<name>` env
+var exported by the wrapper, so the same script works on Linux and macOS
+without hard-coded paths.
+
 ### `<dataDir>/agents/`
 
 User-owned scripts. Scanned with this layout:
