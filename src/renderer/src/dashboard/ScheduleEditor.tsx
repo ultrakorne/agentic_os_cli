@@ -357,23 +357,82 @@ function Stepper({
   onChange: (n: number) => void
   pad?: boolean
 }): JSX.Element {
+  const inc = (): void => {
+    const next = value + step
+    onChange(next > max ? min : next)
+  }
+  const dec = (): void => {
+    const next = value - step
+    if (next >= min) {
+      onChange(next)
+      return
+    }
+    const stepsInRange = Math.floor((max - min) / step)
+    onChange(min + stepsInRange * step)
+  }
+
   const display = pad ? value.toString().padStart(2, '0') : value.toString()
+  const [draft, setDraft] = useState<string | null>(null)
+
+  const commit = (raw: string): void => {
+    setDraft(null)
+    const trimmed = raw.trim()
+    if (trimmed === '') return
+    const n = parseInt(trimmed, 10)
+    if (Number.isNaN(n)) return
+    onChange(Math.min(max, Math.max(min, n)))
+  }
+
   return (
     <span className="inline-flex items-center border border-[var(--color-rule-bright)] tabular">
       <button
         type="button"
-        onClick={() => onChange(Math.max(min, value - step))}
+        onClick={dec}
+        tabIndex={-1}
         className="px-2 py-0.5 text-[var(--color-fg-dim)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-cool)]"
         aria-label="decrease"
       >
         −
       </button>
-      <span className="min-w-[2.5ch] border-x border-[var(--color-rule-bright)] px-2 py-0.5 text-center font-display text-[13px] font-bold text-[var(--color-cool)] neon-text-soft">
-        {display}
-      </span>
+      <input
+        type="text"
+        inputMode="numeric"
+        size={2}
+        value={draft ?? display}
+        onFocus={(e) => {
+          e.currentTarget.select()
+        }}
+        onChange={(e) => {
+          const raw = e.target.value.replace(/[^\d]/g, '').slice(0, 2)
+          setDraft(raw)
+          if (raw === '') return
+          const n = parseInt(raw, 10)
+          if (!Number.isNaN(n) && n >= min && n <= max) onChange(n)
+        }}
+        onBlur={(e) => commit(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur()
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setDraft(null)
+            inc()
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setDraft(null)
+            dec()
+          } else if (e.key === 'Escape') {
+            setDraft(null)
+            e.currentTarget.blur()
+          }
+        }}
+        aria-label="value"
+        className="min-w-[2.5ch] border-x border-[var(--color-rule-bright)] bg-transparent px-2 py-0.5 text-center font-display text-[13px] font-bold text-[var(--color-cool)] neon-text-soft outline-none focus:bg-[var(--color-surface-2)]"
+      />
       <button
         type="button"
-        onClick={() => onChange(Math.min(max, value + step))}
+        onClick={inc}
+        tabIndex={-1}
         className="px-2 py-0.5 text-[var(--color-fg-dim)] transition-colors hover:bg-[var(--color-surface-2)] hover:text-[var(--color-cool)]"
         aria-label="increase"
       >
