@@ -4,8 +4,7 @@ export type ScheduleSpec =
   | { kind: 'hourly'; everyHours: number; minute: number }
   | { kind: 'daily'; days: Weekday[]; hour: number; minute: number }
 
-export type AgentConfig = {
-  id: string
+export type AgentMeta = {
   schedule?: ScheduleSpec
   scheduledAt?: string
   title?: string
@@ -34,11 +33,10 @@ export type Agent = {
   title: string
   description: string
   section: string
-  scriptPath?: string
+  scriptPath: string
   schedule?: ScheduleSpec
   scheduledAt?: string
   scheduled: boolean
-  orphaned: boolean
 }
 
 export type MissedRun = {

@@ -2,17 +2,17 @@
 
 ## Overview
 
-Single-user app, plain files, no database. Everything lives under `<userData>/data/`. State splits along three axes that have different write patterns and durability needs: agent config (rare writes, hand-edit-friendly), run history (one file per run, written by an external process), and user-owned scripts (managed by the owner directly). Each gets its own location.
+Single-user app, plain files, no database. Everything lives under `<userData>/data/`. State splits along three axes that have different write patterns and durability needs: per-agent meta (rare writes, hand-edit-friendly, lives next to the script), run history (one file per run, written by an external process), and user-owned scripts (managed by the owner directly). Each gets its own location.
 
 ## Components
-
-### `data/agents.json`
-
-The unified agent config: `{ agents: AgentConfig[] }`. Each entry holds the agent id plus any combination of `schedule`, `title`, `description`. Hand-editable. Rewritten in full whenever the user edits a schedule. Section is **never** in this file — it comes from the script's parent folder.
 
 ### `data/agents/<id>.<ext>` or `data/agents/<Section>/<id>.<ext>`
 
 User-owned executable scripts. The filename minus extension is the agent id. The parent directory determines the section: top-level scripts get section "Agents"; a first-level subdirectory name becomes the section. Adding an agent means dropping a script; deleting one means removing the file; reorganizing means `mv`.
+
+### `data/agents/<id>.meta.json` (sidecar)
+
+Optional. Holds whatever the dashboard learns *about* an agent that doesn't belong on disk: `schedule`, `scheduledAt`, `title`, `description`. The id and section are derived from the script's path, never stored here. Written via temp+rename when the user edits a schedule or description. An empty meta is removed rather than left as `{}`. Hand-editable.
 
 ### `data/runs/<run-id>.json` + `<run-id>.out`
 
@@ -25,7 +25,7 @@ The bash wrapper invoked by every cron line and by every manual "run now". Refre
 ## Design Decisions
 
 - **Everything under `data/`.** Both engine state and user scripts live there. One directory to back up, one path to inspect.
-- **Single agents.json**, not one file per agent. One file you can hand-edit, version-control, or copy to another machine.
+- **Per-script sidecars, not a central registry.** Meta lives next to the script as `<id>.meta.json`. Copy a script and its sidecar together to share an agent; `rm <id>.*` cleans up everything in one step. There is no "orphan config" failure mode — if there's no script, there's no agent.
 - **Section from filesystem, not config.** The agent's place in the dashboard is determined by where the script lives on disk. Reorganizing is just `mv`. There's no risk of the config saying "Daily" while the disk says nothing — only one place to look.
 - **Per-run files, not a single jsonl.** Atomic writes via temp + rename. Multiline output goes to a sibling `.out` file so JSON escaping in bash stays bounded to fixed fields. Two files per run is a small price for not having to reason about flock or torn appends.
 - **Atomic writes for the JSON files.** Write to `path.tmp`, rename over `path`. Guarantees a partially-written file never replaces a good one.

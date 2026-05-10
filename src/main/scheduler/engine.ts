@@ -2,11 +2,10 @@ import { spawn } from 'child_process'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { Cron } from 'croner'
-import type { AgentConfigStore } from './agent-config-store'
+import type { AgentMetaStore } from './agent-meta-store'
 import type { RunsStore } from './runs-store'
 import type {
   Agent,
-  AgentConfig,
   CrontabStatus,
   JobRun,
   MissedRun,
@@ -21,12 +20,12 @@ import {
   type SyncResult
 } from './crontab'
 import { detectMissed, missedEqual } from './missed'
-import { scanScripts, ensureAgentsDir, type ScriptInfo } from '../agents/scanner'
+import { scanScripts, ensureAgentsDir, type AgentEntry } from '../agents/scanner'
 
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
 export type EngineOpts = {
-  configs: AgentConfigStore
+  meta: AgentMetaStore
   runs: RunsStore
   dataDir: string
   agentsDir: string
@@ -39,7 +38,7 @@ const newId = (): string =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 
 export class SchedulerEngine {
-  private scripts: ScriptInfo[] = []
+  private entries: AgentEntry[] = []
   private missed: MissedRun[] = []
   private sweepTimer: NodeJS.Timeout | null = null
   private wrapperOk = false
@@ -55,7 +54,7 @@ export class SchedulerEngine {
   }
 
   async start(): Promise<void> {
-    await Promise.all([this.opts.configs.load(), this.opts.runs.load()])
+    await this.opts.runs.load()
     await this.installWrapper()
     await ensureAgentsDir(this.opts.agentsDir, join(this.opts.resourcesDir, 'agents'))
     await this.refreshScripts()
@@ -86,55 +85,20 @@ export class SchedulerEngine {
   }
 
   async refreshScripts(): Promise<Agent[]> {
-    this.scripts = await scanScripts(this.opts.agentsDir)
+    this.entries = await scanScripts(this.opts.agentsDir)
     return this.listAgents()
   }
 
   listAgents(): Agent[] {
-    const byId = new Map<string, Agent>()
-
-    for (const cfg of this.opts.configs.list()) {
-      byId.set(cfg.id, this.makeAgentFromConfig(cfg))
-    }
-    for (const script of this.scripts) {
-      const existing = byId.get(script.id)
-      if (existing) {
-        existing.scriptPath = script.scriptPath
-        existing.section = script.section
-        existing.orphaned = false
-      } else {
-        byId.set(script.id, {
-          id: script.id,
-          title: humanize(script.id),
-          description: '',
-          section: script.section,
-          scriptPath: script.scriptPath,
-          schedule: undefined,
-          scheduled: false,
-          orphaned: false
-        })
-      }
-    }
-
-    return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
-  }
-
-  private makeAgentFromConfig(cfg: AgentConfig): Agent {
-    return {
-      id: cfg.id,
-      title: cfg.title ?? humanize(cfg.id),
-      description: cfg.description ?? '',
-      section: 'Agents', // overridden when a matching script is merged in
-      scriptPath: undefined,
-      schedule: cfg.schedule,
-      scheduledAt: cfg.scheduledAt,
-      scheduled: !!cfg.schedule,
-      orphaned: !!cfg.schedule
-    }
+    return this.entries
+      .map((e) => entryToAgent(e))
+      .sort((a, b) => a.id.localeCompare(b.id))
   }
 
   async setSchedule(agentId: string, schedule: ScheduleSpec | null): Promise<void> {
-    await this.opts.configs.setSchedule(agentId, schedule)
+    const entry = this.entries.find((e) => e.id === agentId)
+    if (!entry) throw new Error(`unknown agent "${agentId}"`)
+    entry.meta = await this.opts.meta.setSchedule(entry.metaPath, schedule)
     await this.runSync()
     // Recompute missed runs immediately so the dashboard reflects the new
     // schedule without waiting for the next 5-minute sweep. We suppress the
@@ -144,7 +108,9 @@ export class SchedulerEngine {
   }
 
   async setDescription(agentId: string, description: string): Promise<void> {
-    await this.opts.configs.setDescription(agentId, description)
+    const entry = this.entries.find((e) => e.id === agentId)
+    if (!entry) throw new Error(`unknown agent "${agentId}"`)
+    entry.meta = await this.opts.meta.setDescription(entry.metaPath, description)
     this.opts.onChange?.()
   }
 
@@ -179,8 +145,8 @@ export class SchedulerEngine {
       outputPath: null
     }
 
-    const script = this.scripts.find((s) => s.id === agentId)
-    if (!script) {
+    const entry = this.entries.find((e) => e.id === agentId)
+    if (!entry) {
       stub.status = 'error'
       stub.error = `no script found for agent "${agentId}"`
       stub.endedAt = new Date().toISOString()
@@ -201,7 +167,7 @@ export class SchedulerEngine {
 
     const cp = spawn(
       this.wrapperPath,
-      [this.opts.dataDir, '', agentId, script.scriptPath, stub.id],
+      [this.opts.dataDir, '', agentId, entry.scriptPath, stub.id],
       {
         detached: true,
         stdio: 'ignore',
@@ -297,12 +263,12 @@ export class SchedulerEngine {
     }
 
     const entries: CrontabEntry[] = []
-    for (const agent of this.listAgents()) {
-      if (!agent.schedule || !agent.scriptPath) continue
+    for (const e of this.entries) {
+      if (!e.meta.schedule) continue
       entries.push({
-        agentId: agent.id,
-        scriptPath: agent.scriptPath,
-        spec: agent.schedule
+        agentId: e.id,
+        scriptPath: e.scriptPath,
+        spec: e.meta.schedule
       })
     }
 
@@ -342,6 +308,19 @@ export class SchedulerEngine {
       this.missed = next
       if (notify) this.opts.onChange?.()
     }
+  }
+}
+
+function entryToAgent(e: AgentEntry): Agent {
+  return {
+    id: e.id,
+    title: e.meta.title ?? humanize(e.id),
+    description: e.meta.description ?? '',
+    section: e.section,
+    scriptPath: e.scriptPath,
+    schedule: e.meta.schedule,
+    scheduledAt: e.meta.scheduledAt,
+    scheduled: !!e.meta.schedule
   }
 }
 

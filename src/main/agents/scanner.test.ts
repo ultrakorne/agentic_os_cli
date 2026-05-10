@@ -62,7 +62,13 @@ describe('scanScripts — section from folder structure', () => {
     await makeExec(join(dir, 'top.sh'))
     const scripts = await scanScripts(dir)
     expect(scripts).toEqual([
-      { id: 'top', scriptPath: join(dir, 'top.sh'), section: 'Agents' }
+      {
+        id: 'top',
+        scriptPath: join(dir, 'top.sh'),
+        section: 'Agents',
+        metaPath: join(dir, 'top.meta.json'),
+        meta: {}
+      }
     ])
   })
 
@@ -111,6 +117,66 @@ describe('scanScripts — section from folder structure', () => {
 
   it('ignores hidden subfolders (dot-prefixed)', async () => {
     await makeExec(join(dir, '.hidden', 'sneaky.sh'))
+    const scripts = await scanScripts(dir)
+    expect(scripts).toEqual([])
+  })
+})
+
+describe('scanScripts — sidecar meta', () => {
+  it('folds <id>.meta.json next to the script into meta', async () => {
+    await makeExec(join(dir, 'ping.sh'))
+    await fs.writeFile(
+      join(dir, 'ping.meta.json'),
+      JSON.stringify({
+        title: 'Ping',
+        description: 'liveness probe',
+        schedule: { kind: 'hourly', everyHours: 1, minute: 0 }
+      })
+    )
+    const [entry] = await scanScripts(dir)
+    expect(entry.metaPath).toBe(join(dir, 'ping.meta.json'))
+    expect(entry.meta.title).toBe('Ping')
+    expect(entry.meta.description).toBe('liveness probe')
+    expect(entry.meta.schedule).toEqual({ kind: 'hourly', everyHours: 1, minute: 0 })
+  })
+
+  it('folds sidecars from subfolders too', async () => {
+    await makeExec(join(dir, 'Daily', 'morning.sh'))
+    await fs.writeFile(
+      join(dir, 'Daily', 'morning.meta.json'),
+      JSON.stringify({ title: 'Morning' })
+    )
+    const [entry] = await scanScripts(dir)
+    expect(entry.section).toBe('Daily')
+    expect(entry.meta.title).toBe('Morning')
+  })
+
+  it('treats a missing sidecar as empty meta', async () => {
+    await makeExec(join(dir, 'lonely.sh'))
+    const [entry] = await scanScripts(dir)
+    expect(entry.meta).toEqual({})
+  })
+
+  it('ignores malformed sidecars and warns', async () => {
+    await makeExec(join(dir, 'broken.sh'))
+    await fs.writeFile(join(dir, 'broken.meta.json'), '{ not json')
+    const [entry] = await scanScripts(dir)
+    expect(entry.meta).toEqual({})
+  })
+
+  it('does not treat a *.meta.json file as a script even if executable', async () => {
+    const path = join(dir, 'pretender.meta.json')
+    await fs.writeFile(path, '{}')
+    await fs.chmod(path, 0o755)
+    const scripts = await scanScripts(dir)
+    expect(scripts).toEqual([])
+  })
+
+  it('skips lone sidecars (no matching script)', async () => {
+    await fs.writeFile(
+      join(dir, 'ghost.meta.json'),
+      JSON.stringify({ title: 'Ghost' })
+    )
     const scripts = await scanScripts(dir)
     expect(scripts).toEqual([])
   })

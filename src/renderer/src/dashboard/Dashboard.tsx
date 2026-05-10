@@ -37,8 +37,6 @@ export function Dashboard(): JSX.Element {
     return m
   }, [missed])
 
-  const orphanCount = useMemo(() => agents.filter((a) => a.orphaned).length, [agents])
-
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedId) ?? null,
     [agents, selectedId]
@@ -55,7 +53,7 @@ export function Dashboard(): JSX.Element {
   return (
     <main className="relative z-[1] flex-1 overflow-y-auto">
       <div className="mx-auto max-w-6xl space-y-10 px-6 py-8">
-        <SystemBanner orphanCount={orphanCount} />
+        <SystemBanner />
         <MissedRunsBanner />
 
         {agents.length === 0 ? (

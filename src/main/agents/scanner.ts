@@ -1,13 +1,18 @@
 import { promises as fs, constants as fsc } from 'fs'
 import { basename, extname, join } from 'path'
+import type { AgentMeta } from '../../shared/scheduler'
 
 const SUPPORTED_EXTS = new Set(['.sh', '.bash', '.zsh', ''])
 const DEFAULT_SECTION = 'Agents'
 
-export type ScriptInfo = {
+export const META_SUFFIX = '.meta.json'
+
+export type AgentEntry = {
   id: string
   scriptPath: string
   section: string
+  metaPath: string
+  meta: AgentMeta
 }
 
 /**
@@ -16,10 +21,13 @@ export type ScriptInfo = {
  * section. Deeper nesting is ignored. IDs (filename minus extension) must
  * be unique across the whole tree — duplicates are dropped with a console
  * warning so the dashboard never shows two agents with the same id.
+ *
+ * For each script, a sibling `<id>.meta.json` is read if present and folded
+ * in as `meta`. Missing or malformed sidecars degrade to an empty meta.
  */
-export async function scanScripts(agentsDir: string): Promise<ScriptInfo[]> {
+export async function scanScripts(agentsDir: string): Promise<AgentEntry[]> {
   await fs.mkdir(agentsDir, { recursive: true })
-  const out: ScriptInfo[] = []
+  const out: AgentEntry[] = []
   const seen = new Map<string, string>() // id -> first scriptPath we saw
 
   await collectInto(agentsDir, DEFAULT_SECTION, out, seen)
@@ -43,7 +51,7 @@ export async function scanScripts(agentsDir: string): Promise<ScriptInfo[]> {
 async function collectInto(
   dir: string,
   section: string,
-  out: ScriptInfo[],
+  out: AgentEntry[],
   seen: Map<string, string>
 ): Promise<void> {
   let entries: string[]
@@ -55,6 +63,7 @@ async function collectInto(
   for (const name of entries) {
     if (name.startsWith('.')) continue
     if (name.toLowerCase() === 'readme.md') continue
+    if (name.endsWith(META_SUFFIX)) continue
 
     const ext = extname(name)
     if (!SUPPORTED_EXTS.has(ext)) continue
@@ -84,7 +93,31 @@ async function collectInto(
       continue
     }
     seen.set(id, fullPath)
-    out.push({ id, scriptPath: fullPath, section })
+    const metaPath = join(dir, `${id}${META_SUFFIX}`)
+    const meta = await readMeta(metaPath)
+    out.push({ id, scriptPath: fullPath, section, metaPath, meta })
+  }
+}
+
+async function readMeta(metaPath: string): Promise<AgentMeta> {
+  let txt: string
+  try {
+    txt = await fs.readFile(metaPath, 'utf8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    console.warn(`[scanner] failed to read ${metaPath}:`, err)
+    return {}
+  }
+  try {
+    const parsed = JSON.parse(txt)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as AgentMeta
+    }
+    console.warn(`[scanner] ${metaPath} is not a JSON object — ignoring`)
+    return {}
+  } catch (err) {
+    console.warn(`[scanner] failed to parse ${metaPath}:`, err)
+    return {}
   }
 }
 

@@ -2,9 +2,9 @@
 
 ## Architecture
 
-The engine lives in the Electron main process but **delegates the actual ticking to system cron**. On `engine.start()` it (1) loads the agent config store + runs store, (2) installs `wrapper.sh` from `resources/` into `<userData>/data/`, (3) ensures `<userData>/data/agents/` exists and seeds it on first run, (4) scans the agents directory tree for scripts, (5) checks for `crontab` and `python3` on PATH, (6) reconciles the managed block of the user's crontab, (7) starts a directory watcher on `runs/`, and (8) starts a 5-minute setInterval that re-runs missed-run detection.
+The engine lives in the Electron main process but **delegates the actual ticking to system cron**. On `engine.start()` it (1) loads the runs store, (2) installs `wrapper.sh` from `resources/` into `<userData>/data/`, (3) ensures `<userData>/data/agents/` exists and seeds it on first run, (4) scans the agents directory tree for scripts and folds each one's `<id>.meta.json` sidecar into the in-memory entry, (5) checks for `crontab` and `python3` on PATH, (6) reconciles the managed block of the user's crontab, (7) starts a directory watcher on `runs/`, and (8) starts a 5-minute setInterval that re-runs missed-run detection.
 
-Mutations all go through `engine.setSchedule(agentId, spec | null)` (which writes `agents.json` and rewrites the managed crontab block) or `engine.runManually(agentId)` (which spawns the wrapper directly with `AGENTIC_OS_TRIGGER=manual` and a pre-generated run id). The runs directory watcher converts wrapper writes into `scheduler:changed` IPC broadcasts so renderer windows re-fetch.
+Mutations all go through `engine.setSchedule(agentId, spec | null)` (which writes the agent's `<id>.meta.json` sidecar and rewrites the managed crontab block) or `engine.runManually(agentId)` (which spawns the wrapper directly with `AGENTIC_OS_TRIGGER=manual` and a pre-generated run id). The runs directory watcher converts wrapper writes into `scheduler:changed` IPC broadcasts so renderer windows re-fetch.
 
 ## Source Files
 
@@ -12,7 +12,7 @@ Mutations all go through `engine.setSchedule(agentId, spec | null)` (which write
 |------|------|
 | `resources/wrapper.sh` | Bash run-wrapper invoked by cron and by manual runs; writes `<run-id>.json` + `<run-id>.out`; reinstalled on every app start |
 | `resources/agents/{ping.sh,disk-free.sh,README.md}` | Seed agents copied into `<userData>/data/agents/` on first run |
-| `src/shared/scheduler.ts` | Public types shared across main/preload/renderer (`Agent`, `AgentConfig`, `JobRun`, `MissedRun`, `CrontabStatus`, `ScheduleSpec`) |
+| `src/shared/scheduler.ts` | Public types shared across main/preload/renderer (`Agent`, `AgentMeta`, `JobRun`, `MissedRun`, `CrontabStatus`, `ScheduleSpec`) |
 | `src/main/scheduler/types.ts` | Re-exports shared types for the main-process import path |
 | `src/main/scheduler/spec.ts` | `compileToCron` + default spec constants; pure functions |
 | `src/main/scheduler/spec.test.ts` | Spec compilation + previous-tick math tests |
@@ -20,11 +20,11 @@ Mutations all go through `engine.setSchedule(agentId, spec | null)` (which write
 | `src/main/scheduler/crontab.test.ts` | Marker round-trip + block-build + purge tests |
 | `src/main/scheduler/missed.ts` | Walk-forward expected-tick enumeration via croner's `nextRun`; tolerance match against actual runs |
 | `src/main/scheduler/missed.test.ts` | Pure-function tests for missed-run detection |
-| `src/main/scheduler/agent-config-store.ts` | Persists `<dataDir>/agents.json`; atomic-rename writes, single write queue; `setSchedule(id, spec | null)` is the main mutation point |
-| `src/main/scheduler/engine.ts` | Joins config + scripts into `Agent[]`; manages crontab + missed sweep + manual-run spawn |
+| `src/main/scheduler/agent-meta-store.ts` | Reads/writes `<id>.meta.json` sidecars; atomic-rename writes; per-path write queue; `setSchedule(metaPath, spec | null)` is the main mutation point |
+| `src/main/scheduler/engine.ts` | Maps scanned `AgentEntry`s into `Agent[]`; manages crontab + missed sweep + manual-run spawn |
 | `src/main/scheduler/runs-store.ts` | Reader for `runs/<id>.{json,out}`; fs.watch + debounce; lazy output read |
-| `src/main/agents/scanner.ts` | Walks `<userData>/data/agents/` (top-level + first-level subdirs); section = parent folder; deduplicates ids |
-| `src/main/agents/scanner.test.ts` | Extension policy + section-from-folder tests |
+| `src/main/agents/scanner.ts` | Walks `<userData>/data/agents/` (top-level + first-level subdirs); section = parent folder; deduplicates ids; reads each `<id>.meta.json` sidecar inline |
+| `src/main/agents/scanner.test.ts` | Extension policy + section-from-folder + sidecar-folding tests |
 | `src/main/ipc.ts` | Wires engine + theme to `ipcMain.handle`; defines IPC channel constants |
 | `src/main/index.ts` | App boot: builds stores, constructs the engine |
 
@@ -32,11 +32,11 @@ Mutations all go through `engine.setSchedule(agentId, spec | null)` (which write
 
 The on-disk shapes are documented under [data-layout](../data-layout/TECHNICAL.md). The summary:
 
-- `agents.json` — agent config: id + optional schedule + optional title/description
+- `agents/<id>.<ext>` or `agents/<Section>/<id>.<ext>` — user-owned executable scripts
+- `agents/<id>.meta.json` — optional per-agent sidecar: schedule + scheduledAt + optional title/description
 - `runs/<run-id>.json` — meta record per run, written by `wrapper.sh`
 - `runs/<run-id>.out` — captured stdout+stderr
 - `wrapper.sh` — refreshed on every app start from `resources/wrapper.sh`
-- `agents/<id>.<ext>` or `agents/<Section>/<id>.<ext>` — user-owned executable scripts
 
 ## Cron Layout
 
@@ -59,8 +59,9 @@ Each cron line carries a trailing `# agentic_os:<agentId>` tag. The tag lets the
 - **fs.watch is debounced 250ms.** When the wrapper writes the running meta and then the final meta, both events would otherwise re-broadcast. The 5-minute sweep also re-indexes the dir as a safety net.
 - **Output is read lazily.** `RunsStore.list()` returns each run with a tail summary (last 4KB) populated at ingest time; full output is only loaded on `scheduler:read-run-output(runId)`.
 - **Runs dir GC at engine start.** Files are grouped by run-id stem so `<id>.json` + `<id>.out` are always deleted as a pair, never leaving an orphan on either side.
-- **Section comes from the script's parent directory.** `agents.json` never stores section. Top-level scripts get section `"Agents"`; first-level subdirectory names become section names. Deeper nesting is ignored. Duplicate ids across subdirectories are dropped (top-level wins, then alphabetical) with a console warning.
-- **Orphan agents are *flagged*, not removed.** `engine.listAgents()` joins config entries against discovered scripts and sets `orphaned: true` on configs without a matching script. Orphans are excluded from crontab sync and rendered in red in the UI.
+- **Section comes from the script's parent directory.** Sidecars never store section. Top-level scripts get section `"Agents"`; first-level subdirectory names become section names. Deeper nesting is ignored. Duplicate ids across subdirectories are dropped (top-level wins, then alphabetical) with a console warning.
+- **A sidecar with no matching script is silently ignored.** Lone `*.meta.json` files don't appear in `agents:list`. If the user later adds the matching script, the sidecar attaches automatically. There is no orphan banner.
+- **Empty meta = no file.** If a write would produce `{}` (e.g. clearing a description on an unscheduled agent), the sidecar is `unlink`ed instead of left as a stub.
 - **Wrapper is reinstalled on every start.** Cheap, and keeps the on-disk wrapper in lockstep with whatever ships in the asar.
 - **Manual runs are detached and unrefed.** `child_process.spawn(wrapper, …, { detached: true, stdio: 'ignore' })` then `cp.unref()` — the run survives even if the user quits the app immediately after clicking. The run id is pre-generated and threaded as the wrapper's 5th argv, so the IPC stub's `id` matches what the wrapper writes to disk.
 - **Cron PATH is minimal.** The wrapper exports `PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH`. Anything past that is the script's responsibility.

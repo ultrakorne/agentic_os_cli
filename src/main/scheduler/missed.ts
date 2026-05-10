@@ -27,7 +27,7 @@ export function detectMissed(
   const out: MissedRun[] = []
 
   for (const agent of agents) {
-    if (!agent.schedule || !agent.scriptPath) continue
+    if (!agent.schedule) continue
 
     let cron: Cron
     try {

@@ -1,13 +1,9 @@
 import { useEffect, useState, type JSX } from 'react'
 import { useApp } from '../store'
 
-type Props = {
-  orphanCount: number
-}
-
 type Action = { label: string; run: () => void; confirm?: boolean }
 
-export function SystemBanner({ orphanCount }: Props): JSX.Element | null {
+export function SystemBanner(): JSX.Element | null {
   const status = useApp((s) => s.crontabStatus)
   const reconcile = useApp((s) => s.reconcileCrontab)
   const rescan = useApp((s) => s.rescanAgents)
@@ -51,14 +47,6 @@ export function SystemBanner({ orphanCount }: Props): JSX.Element | null {
       })
     }
   }
-  if (orphanCount > 0) {
-    issues.push({
-      tone: 'warn',
-      text: `${orphanCount} schedule${orphanCount === 1 ? '' : 's'} reference missing scripts — drop matching files into your agents folder`,
-      action: { label: 'open agents folder', run: () => void window.api.agents.revealDir() }
-    })
-  }
-
   if (issues.length === 0) return null
 
   return (

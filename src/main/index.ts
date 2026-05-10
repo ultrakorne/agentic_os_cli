@@ -3,7 +3,7 @@ import { join, resolve } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { SchedulerEngine } from './scheduler/engine'
-import { AgentConfigStore } from './scheduler/agent-config-store'
+import { AgentMetaStore } from './scheduler/agent-meta-store'
 import { RunsStore } from './scheduler/runs-store'
 import { computeDevTickCommand } from './scheduler/tick-command'
 import { broadcastChange, registerIpc } from './ipc'
@@ -63,7 +63,7 @@ app.whenReady().then(async () => {
   const agentsDir = join(dataDir, 'agents')
   const resourcesDir = getResourcesDir()
 
-  const configs = new AgentConfigStore(join(dataDir, 'agents.json'))
+  const meta = new AgentMetaStore()
   const runs = new RunsStore(join(dataDir, 'runs'))
   const tickCommand = is.dev
     ? computeDevTickCommand({
@@ -72,7 +72,7 @@ app.whenReady().then(async () => {
       })
     : null
   engine = new SchedulerEngine({
-    configs,
+    meta,
     runs,
     dataDir,
     agentsDir,

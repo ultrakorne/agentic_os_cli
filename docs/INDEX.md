@@ -8,13 +8,13 @@ Agentic OS is a **view over filesystem state**. The renderer reads JSON files un
 
 1. **System cron is the ticker.** Scheduled runs fire from a managed section of the user's crontab, not from a long-lived process inside the app. Schedules survive reboots, app crashes, and weeks of the dashboard never being opened.
 2. **`wrapper.sh` is the executor.** Cron invokes it; it runs the agent script and writes one meta JSON + one `.out` file per run into `<userData>/data/runs/`. Manual "run now" from the UI spawns the same wrapper detached, so cron triggers and click triggers travel the exact same code path.
-3. **An engine tick keeps state coherent.** Re-scans the agents directory, reconciles the managed crontab against `agents.json`, sweeps for missed runs. The tick currently runs in-process while the GUI is open (every five minutes); it is designed to also be driveable from a single cron line — `*/5 * * * * agentic-os tick` — so the engine stays correct when the app has not been opened in days.
+3. **An engine tick keeps state coherent.** Re-scans the agents directory (folding in each script's `<id>.meta.json` sidecar), reconciles the managed crontab against the discovered schedules, sweeps for missed runs. The tick currently runs in-process while the GUI is open (every five minutes); it is designed to also be driveable from a single cron line — `*/5 * * * * agentic-os tick` — so the engine stays correct when the app has not been opened in days.
 
 Consequences worth defending:
 
 - **Adding an agent is dropping an executable file** into `<userData>/data/agents/`. No reload, no rebuild, no in-tree registry. The next tick (or next GUI open) picks it up. Scheduling is what makes cron care; until then a script is purely visible, not active.
 - **The view is closeable.** The UI is a way to see and edit; nothing in the runtime contract depends on it being alive.
-- **A future TUI/CLI is just another view over the same files.** Every UI mutates `agents.json` and reads `runs/*.json`; there is no business logic to port.
+- **A future TUI/CLI is just another view over the same files.** Every UI mutates per-agent `<id>.meta.json` sidecars and reads `runs/*.json`; there is no business logic to port.
 - **New features default to filesystem first.** Store as JSON, mutate via small focused scripts, render in the view. Reach for renderer-side logic only when the work is genuinely interactive (drag, animation, micro-state).
 
 When in doubt: if a piece of work can run from cron without the app open, it should.

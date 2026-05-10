@@ -7,57 +7,48 @@
 - `dataDir = app.getPath('userData') + '/data'` — engine state and user scripts (the latter under `dataDir/agents/`)
 - `resourcesDir` — bundled assets (`wrapper.sh`, seed agents); resolved differently in dev vs packaged builds
 
-The engine then loads `agents.json`, indexes the runs directory, installs the wrapper, seeds the agents dir if empty, scans agents, reconciles the crontab, and starts watching the runs directory.
+The engine then indexes the runs directory, installs the wrapper, seeds the agents dir if empty, scans agents (which folds in each script's `.meta.json` sidecar in the same pass), reconciles the crontab, and starts watching the runs directory. There is no global config file to load.
 
 ## Source Files
 
 | File | Role |
 |------|------|
-| `src/main/scheduler/agent-config-store.ts` | Owns `agents.json`; atomic-rename writes, single write queue; `setSchedule(id, spec | null)` is the main mutation |
+| `src/main/scheduler/agent-meta-store.ts` | Reads/writes per-agent `<id>.meta.json` sidecars; per-path write queue; atomic temp+rename; an empty meta deletes the sidecar |
 | `src/main/scheduler/runs-store.ts` | Reader: indexes `<dataDir>/runs/<id>.json` files; fs.watch + debounce; lazy output read; pair-aware GC |
-| `src/main/agents/scanner.ts` | Walks `<dataDir>/agents/` (top-level + first-level subdirs); attributes section from parent folder; deduplicates ids |
+| `src/main/agents/scanner.ts` | Walks `<dataDir>/agents/` (top-level + first-level subdirs); attributes section from parent folder; deduplicates ids; reads each `<id>.meta.json` sidecar inline |
 | `src/main/index.ts` | Resolves the roots and wires the stores into the engine |
 
 ## Data Model
 
-### `agents.json`
+### `<id>.meta.json` (sidecar)
 
 ```json
 {
-  "agents": [
-    {
-      "id": "ping",
-      "schedule": { "kind": "hourly", "everyHours": 1, "minute": 0 }
-    },
-    {
-      "id": "morning-digest",
-      "title": "Morning digest",
-      "description": "Summarize overnight notifications",
-      "schedule": { "kind": "daily", "days": ["mon","tue","wed","thu","fri"], "hour": 9, "minute": 0 }
-    },
-    {
-      "id": "release-notes"
-    }
-  ]
+  "schedule": { "kind": "hourly", "everyHours": 1, "minute": 0 },
+  "scheduledAt": "2026-05-09T13:39:52Z",
+  "title": "Morning digest",
+  "description": "Summarize overnight notifications"
 }
 ```
 
-`AgentConfig` is defined in `src/shared/scheduler.ts`. Every field except `id` is optional. The dashboard typically writes only `id + schedule`; `title` and `description` are populated by hand-edit. Section is **never** stored here — it's read from the script's parent directory at scan time.
+`AgentMeta` is defined in `src/shared/scheduler.ts`. Every field is optional; a missing or empty sidecar means defaults all the way down (no schedule, humanized id as title, blank description). The id and section are derived from the script's path and are never stored in the sidecar.
 
-The dashboard's unified `Agent` view (returned by `agents:list`) is computed at IPC time by joining this file against the scanned scripts:
+The dashboard's unified `Agent` view (returned by `agents:list`) is built directly from each scanned `AgentEntry`:
 
 ```ts
 type Agent = {
   id: string
-  title: string         // resolved (config.title || humanize(id))
+  title: string         // meta.title ?? humanize(id)
   description: string
   section: string       // from disk
-  scriptPath?: string   // undefined = orphan config entry
+  scriptPath: string
   schedule?: ScheduleSpec
+  scheduledAt?: string
   scheduled: boolean
-  orphaned: boolean
 }
 ```
+
+A sidecar with no matching executable script is silently ignored on scan — it does not appear in `agents:list`. (If the user later adds the script, the sidecar attaches automatically.)
 
 ### `runs/<run-id>.json`
 
@@ -119,9 +110,10 @@ IDs must be unique across the whole tree; duplicates are dropped (top-level wins
 - **fs.watch on `runs/`** is debounced 250ms; the 5-minute missed-run sweep doubles as a safety net for any watch events the OS drops.
 - **GC at engine start, not continuous.** If `runs/` exceeds 2000 runs, the oldest by mtime are deleted down to that cap. Files are grouped by stem so `<id>.json` and `<id>.out` always age out together — never an orphan on either side.
 - **In-memory cache is 500 newest runs.** Plus a tail summary per run (~4KB).
-- **Atomic-rename for the JSON files.** `writeJson` writes `path.tmp` then `rename`s.
-- **Single write queue** in `AgentConfigStore` serialises mutations.
-- **Missing files are not errors.** All readers treat `ENOENT` as "first run, start empty"; the agents scanner creates the dir on first call.
+- **Atomic-rename for the JSON files.** `writeJson` writes `path.tmp` then `rename`s. Sidecar writes that produce an empty meta `unlink` the file instead, so the directory listing stays minimal.
+- **Per-path write queue** in `AgentMetaStore` serialises mutations to the same sidecar; different sidecars write concurrently.
+- **Missing files are not errors.** All readers treat `ENOENT` as "no meta, use defaults"; the agents scanner creates the dir on first call.
+- **Scanner skips `*.meta.json`.** Sidecars sit next to scripts in the same directory; the executable walk filters them out so a meta file is never mistaken for an agent.
 
 ## Dependencies
 

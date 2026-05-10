@@ -1,6 +1,6 @@
 export type {
   Agent,
-  AgentConfig,
+  AgentMeta,
   CrontabStatus,
   JobRun,
   JobRunStatus,

@@ -2,7 +2,7 @@ import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SchedulerEngine } from '../main/scheduler/engine'
-import { AgentConfigStore } from '../main/scheduler/agent-config-store'
+import { AgentMetaStore } from '../main/scheduler/agent-meta-store'
 import { RunsStore } from '../main/scheduler/runs-store'
 import { computeDevTickCommand } from '../main/scheduler/tick-command'
 import { trimLog } from './log-trim'
@@ -31,7 +31,7 @@ async function main(): Promise<void> {
   const resourcesDir = process.env.AGENTIC_OS_RESOURCES_DIR ?? join(root, 'resources')
   const agentsDir = join(dataDir, 'agents')
 
-  const configs = new AgentConfigStore(join(dataDir, 'agents.json'))
+  const meta = new AgentMetaStore()
   const runs = new RunsStore(join(dataDir, 'runs'))
   // tick.ts only ever runs from a dev checkout (it's a tsx-driven script
   // under src/). A future packaged build invokes a different entry point.
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
     tickLogPath: join(dataDir, 'tick.log')
   })
   const engine = new SchedulerEngine({
-    configs,
+    meta,
     runs,
     dataDir,
     agentsDir,

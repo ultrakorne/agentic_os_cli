@@ -26,8 +26,7 @@ function hourlyAgent(id: string, scriptPath = `/agents/${id}.sh`): Agent {
     section: 'Agents',
     scriptPath,
     schedule: { kind: 'hourly', everyHours: 1, minute: 0 },
-    scheduled: true,
-    orphaned: false
+    scheduled: true
   }
 }
 
@@ -102,15 +101,6 @@ describe('detectMissed', () => {
 
   it('skips agents with no schedule', () => {
     const agent: Agent = { ...hourlyAgent('ping'), schedule: undefined, scheduled: false }
-    const missed = detectMissed([agent], [], {
-      now: new Date('2026-05-09T05:30:00Z'),
-      windowMs: 3600_000
-    })
-    expect(missed).toEqual([])
-  })
-
-  it('skips orphan agents (no scriptPath)', () => {
-    const agent: Agent = { ...hourlyAgent('gone'), scriptPath: undefined, orphaned: true }
     const missed = detectMissed([agent], [], {
       now: new Date('2026-05-09T05:30:00Z'),
       windowMs: 3600_000

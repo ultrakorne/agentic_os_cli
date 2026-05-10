@@ -10,12 +10,12 @@ This shape gets us three properties cleanly: (1) schedules fire even when the ap
 
 ### Agent
 
-Two halves: a script on disk + an optional config entry.
+Two halves that always live together on disk: a script + an optional sidecar.
 
 - **Script:** any executable shell file at `<userData>/data/agents/<id>.<ext>` (top-level → section "Agents") or `<userData>/data/agents/<Section>/<id>.<ext>` (first-level subdirectory name = section). Filename without extension is the agent id; ids must be unique across the whole tree.
-- **Config:** an entry in `<userData>/data/agents.json` keyed by id, holding any combination of `schedule`, `scheduledAt`, `title`, `description`. None of the fields are required — the dashboard writes a config entry when the user gives the agent a schedule or edits its description. `scheduledAt` (ISO timestamp) is automatically set whenever the schedule changes; missed-run detection ignores expected ticks before this point so newly-set schedules don't backfill historical misses. Section is **never** in the config: it always comes from the script's parent folder.
+- **Sidecar:** an optional `<id>.meta.json` next to the script, holding any combination of `schedule`, `scheduledAt`, `title`, `description`. None of the fields are required — the dashboard writes the sidecar when the user gives the agent a schedule or edits its description. `scheduledAt` (ISO timestamp) is automatically set whenever the schedule changes; missed-run detection ignores expected ticks before this point so newly-set schedules don't backfill historical misses. Section is **never** in the sidecar: it always comes from the script's parent folder.
 
-The two halves are joined into a unified `Agent` view inside the engine. An agent that has a script but no config entry shows on the dashboard with default title / description / no schedule. An agent that has a config entry but no matching script is `orphaned: true` and skipped by crontab sync.
+The two halves are folded into a unified `Agent` view by the scanner. An agent with a script but no sidecar shows on the dashboard with default title / description / no schedule. A sidecar with no matching script is silently ignored — copying or deleting an agent is `cp <id>.*` / `rm <id>.*`.
 
 ### Schedule spec
 
@@ -45,8 +45,7 @@ A `JobRun` is the meta JSON written by the wrapper. The shape carries `jobId` (t
 In-process glue that owns no scheduling of its own. Responsibilities:
 
 - Install/refresh the wrapper on every start.
-- Scan the agents directory tree (top level + first-level subdirs) for scripts.
-- Load `agents.json`; merge configs + scripts into a unified `Agent[]` view.
+- Scan the agents directory tree (top level + first-level subdirs) for scripts, folding each script's `<id>.meta.json` sidecar into a unified `AgentEntry`.
 - Reconcile the managed crontab section whenever schedules change.
 - Watch the runs directory and broadcast changes to renderer windows.
 - Sweep for missed runs every five minutes.
@@ -56,7 +55,7 @@ In-process glue that owns no scheduling of its own. Responsibilities:
 
 ### Schedule an agent
 
-Owner clicks an agent card, picks `hourly` / `daily`, saves. The renderer calls `agents:set-schedule(id, spec)`; the engine upserts the entry in `agents.json`, then rewrites the managed crontab block. From then on, `cron` runs the agent — independent of whether the app is open.
+Owner clicks an agent card, picks `hourly` / `daily`, saves. The renderer calls `agents:set-schedule(id, spec)`; the engine writes the script's sidecar (`<id>.meta.json`), then rewrites the managed crontab block. From then on, `cron` runs the agent — independent of whether the app is open.
 
 ### Manual run
 
@@ -65,10 +64,6 @@ Owner clicks `[run]`. The engine spawns the wrapper as a detached process with t
 ### Missed runs
 
 Every five minutes (and once at startup) the engine enumerates the expected ticks for each agent across the last 24 hours, cross-references them with actual runs (90s tolerance for cron jitter / wake lag), and produces a `MissedRun[]` set. The dashboard shows the top three with a per-row "run now" button. There is no auto-fire — cron is the source of truth and the user decides whether a missed run is still relevant.
-
-### Orphaned agents
-
-A config entry in `agents.json` whose id doesn't match any script on disk is flagged `orphaned: true`. Crontab sync skips orphans (no broken cron line gets written). The dashboard surfaces an orphan banner that points the user to the agents folder.
 
 ### Reconcile a tampered crontab
 
@@ -80,7 +75,7 @@ If the user (or another tool) damages the BEGIN/END markers of the managed secti
 - **Drop catch-up auto-fire.** During downtime, cron either ran the job or it didn't. Re-firing on app launch was a guess; surfacing missed runs and letting the user decide is more honest.
 - **Per-run files, not jsonl appends.** Atomic writes via temp + rename; multiline output goes into a sibling `.out` file so JSON escaping is bounded to fixed fields.
 - **Agents are files on disk, not code.** Adding a new agent means dropping a script. No code reload, no app rebuild, no in-tree registry.
-- **Section comes from filesystem, not config.** Folder-as-tab is intuitive (`mv` to reorganize) and avoids a third source of truth. `agents.json` only stores what isn't on disk: the schedule plus optional human-readable overrides.
-- **Single agents.json**, not one config file per agent. One file you can hand-edit, version-control, or copy to another machine.
+- **Section comes from filesystem, not config.** Folder-as-tab is intuitive (`mv` to reorganize) and avoids a third source of truth. The sidecar only stores what isn't on disk: the schedule plus optional human-readable overrides.
+- **Per-script sidecars, not a central registry.** `<id>.meta.json` lives next to its script; copying or deleting an agent is `cp <id>.*` / `rm <id>.*`. There is no orphan-config failure mode and no global file the scanner has to reconcile against.
 - **System dependencies are surfaced, not papered over.** If `crontab`, `python3`, or `wrapper.sh` is missing, the dashboard shows a banner explaining what to install. We don't ship a fallback path that silently degrades.
 - **Conflict over silent overwrite.** When a hand-edit damages the managed crontab section, we *don't* rewrite by default. The user explicitly clicks "reconcile" (twice — confirm step) to authorize losing their edits.
