@@ -1,0 +1,30 @@
+import type { ThemeDef } from '../theme'
+
+export const hackerman: ThemeDef = {
+  id: 'hackerman',
+  name: 'hackerman',
+  colors: {
+    bg: '#0B0C16',
+    fg: '#ddf7ff',
+    accent: '#82FB9C',
+    cursor: '#ddf7ff',
+    selectionFg: '#0B0C16',
+    selectionBg: '#ddf7ff',
+    color0: '#3E4058',
+    color1: '#50f872',
+    color2: '#4fe88f',
+    color3: '#50f7d4',
+    color4: '#829dd4',
+    color5: '#86a7df',
+    color6: '#7cf8f7',
+    color7: '#85E1FB',
+    color8: '#6a6e95',
+    color9: '#85ff9d',
+    color10: '#9cf7c2',
+    color11: '#a4ffec',
+    color12: '#c4d2ed',
+    color13: '#cddbf4',
+    color14: '#d1fffe',
+    color15: '#ddf7ff'
+  }
+}

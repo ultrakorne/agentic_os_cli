@@ -1,0 +1,30 @@
+import type { ThemeDef } from '../theme'
+
+export const osakaJade: ThemeDef = {
+  id: 'osaka-jade',
+  name: 'osaka-jade',
+  colors: {
+    bg: '#111c18',
+    fg: '#C1C497',
+    accent: '#509475',
+    cursor: '#D7C995',
+    selectionFg: '#111C18',
+    selectionBg: '#C1C497',
+    color0: '#23372B',
+    color1: '#FF5345',
+    color2: '#549e6a',
+    color3: '#459451',
+    color4: '#509475',
+    color5: '#D2689C',
+    color6: '#2DD5B7',
+    color7: '#F6F5DD',
+    color8: '#53685B',
+    color9: '#db9f9c',
+    color10: '#63b07a',
+    color11: '#E5C736',
+    color12: '#ACD4CF',
+    color13: '#75bbb3',
+    color14: '#8CD3CB',
+    color15: '#9eebb3'
+  }
+}
