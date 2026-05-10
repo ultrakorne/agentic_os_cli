@@ -22,7 +22,7 @@ export function AgentCard({
   onSelect
 }: Props): JSX.Element {
   const schedule = agent.schedule
-  const [running, setRunning] = useState(false)
+  const [pendingSince, setPendingSince] = useState<number | null>(null)
   const [nextRunIso, setNextRunIso] = useState<string | null>(null)
   const [launchError, setLaunchError] = useState<string | null>(null)
 
@@ -46,24 +46,39 @@ export function AgentCard({
     return () => clearTimeout(t)
   }, [launchError])
 
+  // clear pending once a newer run shows up in the store, with a failsafe so
+  // we don't get stuck on if the run JSON never arrives.
+  useEffect(() => {
+    if (pendingSince === null) return
+    if (recentRun && new Date(recentRun.startedAt).getTime() >= pendingSince - 1000) {
+      setPendingSince(null)
+    }
+  }, [recentRun, pendingSince])
+  useEffect(() => {
+    if (pendingSince === null) return
+    const t = setTimeout(() => setPendingSince(null), 10000)
+    return () => clearTimeout(t)
+  }, [pendingSince])
+
   const handleRun = async (e: React.MouseEvent | React.KeyboardEvent): Promise<void> => {
     e.stopPropagation()
-    setRunning(true)
+    setPendingSince(Date.now())
     setLaunchError(null)
     try {
       const res = await window.api.scheduler.runNow(agent.id)
       if (res.status === 'error') {
         setLaunchError(res.error ?? 'run failed to launch')
+        setPendingSince(null)
       }
     } catch (err) {
       setLaunchError(err instanceof Error ? err.message : 'run failed to launch')
-    } finally {
-      setRunning(false)
+      setPendingSince(null)
     }
   }
 
+  const pending = pendingSince !== null
   const status: Status = recentRun?.status
-  const live = status === 'running' || running
+  const live = status === 'running' || pending
   const glow = pickGlow(status, !!schedule, selected, live)
 
   return (
@@ -99,21 +114,20 @@ export function AgentCard({
           >
             {agent.id}
           </span>
-          {recentRun && (
-            <span className="mt-0.5 block text-[10px] text-[var(--color-fg-faint)] tabular">
-              {relativeFromNow(recentRun.startedAt)}
-            </span>
-          )}
+          <span className="mt-0.5 block text-[10px] text-[var(--color-fg-faint)] tabular">
+            {recentRun ? relativeFromNow(recentRun.startedAt) : 'never run'}
+          </span>
         </span>
-        <RunButton onClick={handleRun} running={running} />
+        <RunButton onClick={handleRun} running={pending} />
       </div>
 
       {/* description */}
-      {agent.description && (
-        <p className="relative line-clamp-2 text-[12px] leading-relaxed text-[var(--color-fg-dim)]">
-          {agent.description}
-        </p>
-      )}
+      <p
+        aria-hidden={!agent.description}
+        className="relative truncate min-h-[20px] text-[12px] leading-relaxed text-[var(--color-fg-dim)]"
+      >
+        {agent.description ?? ''}
+      </p>
 
       {launchError && (
         <p
@@ -184,7 +198,7 @@ function RunButton({
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') onClick(e)
       }}
-      className={`relative inline-flex shrink-0 items-center gap-1 border px-2 py-1 font-display text-[10px] font-bold uppercase transition-all ${
+      className={`relative inline-flex w-[68px] shrink-0 items-center justify-center gap-1 border px-2 py-1 font-display text-[10px] font-bold uppercase transition-colors ${
         running
           ? 'border-[var(--color-fg-faint)] text-[var(--color-fg-faint)]'
           : 'border-[var(--color-hot)] text-[var(--color-hot)] hover:bg-[var(--color-hot)] hover:text-[var(--color-bg)] hover:shadow-[0_0_18px_-2px_var(--color-hot)] active:translate-y-px'

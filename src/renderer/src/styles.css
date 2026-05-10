@@ -268,8 +268,10 @@ body::after {
     transform: translateY(100%);
   }
 }
+/* host overflow only — JSX provides `absolute inset-0` for positioning.
+   declaring position here would override the utility (plain rules > tailwind
+   utilities layer) and force the span back into flex flow, adding a phantom gap. */
 .scanline-host {
-  position: relative;
   overflow: hidden;
 }
 .scanline-host::after {
