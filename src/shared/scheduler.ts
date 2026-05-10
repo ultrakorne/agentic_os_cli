@@ -44,6 +44,11 @@ export type MissedRun = {
   expectedAt: string
 }
 
+export type AgentScanIssue = {
+  kind: 'not-executable'
+  path: string
+}
+
 export type CrontabStatus = {
   managed: boolean
   hasMarkers: boolean

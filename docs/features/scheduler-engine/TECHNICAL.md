@@ -23,8 +23,8 @@ Mutations all go through `engine.setSchedule(agentId, spec | null)` (which write
 | `src/main/scheduler/agent-meta-store.ts` | Reads/writes `<id>.meta.json` sidecars; atomic-rename writes; per-path write queue; `setSchedule(metaPath, spec | null)` is the main mutation point |
 | `src/main/scheduler/engine.ts` | Maps scanned `AgentEntry`s into `Agent[]`; manages crontab + missed sweep + manual-run spawn |
 | `src/main/scheduler/runs-store.ts` | Reader for `runs/<id>.{json,out}`; fs.watch + debounce; lazy output read |
-| `src/main/agents/scanner.ts` | Walks `<userData>/data/agents/` (top-level + first-level subdirs); section = parent folder; deduplicates ids; reads each `<id>.meta.json` sidecar inline |
-| `src/main/agents/scanner.test.ts` | Extension policy + section-from-folder + sidecar-folding tests |
+| `src/main/agents/scanner.ts` | Walks `<userData>/data/agents/` (top-level + first-level subdirs); section = parent folder; deduplicates ids; reads each `<id>.meta.json` sidecar inline; `findScanIssues` reports candidates rejected for surfacable reasons (currently `not-executable`) |
+| `src/main/agents/scanner.test.ts` | Extension policy + section-from-folder + sidecar-folding + scan-issue tests |
 | `src/main/ipc.ts` | Wires engine + theme to `ipcMain.handle`; defines IPC channel constants |
 | `src/main/index.ts` | App boot: builds stores, constructs the engine |
 
@@ -61,6 +61,7 @@ Each cron line carries a trailing `# agentic_os:<agentId>` tag. The tag lets the
 - **Runs dir GC at engine start.** Files are grouped by run-id stem so `<id>.json` + `<id>.out` are always deleted as a pair, never leaving an orphan on either side.
 - **Section comes from the script's parent directory.** Sidecars never store section. Top-level scripts get section `"Agents"`; first-level subdirectory names become section names. Deeper nesting is ignored. Duplicate ids across subdirectories are dropped (top-level wins, then alphabetical) with a console warning.
 - **A sidecar with no matching script is silently ignored.** Lone `*.meta.json` files don't appear in `agents:list`. If the user later adds the matching script, the sidecar attaches automatically. There is no orphan banner.
+- **Non-executable scripts are surfaced, not dropped silently.** A file with a supported shell extension (or no extension and a `#!` shebang) sitting under `agents/` but missing the `+x` bit is collected by `findScanIssues` as `{ kind: 'not-executable', path }`. The dashboard's `SystemBanner` renders a per-file warn row so the user knows why their script didn't appear. Reserved-id and duplicate-id rejections still only log to the main-process console (low signal-to-noise for end users; the warning suffices).
 - **Empty meta = no file.** If a write would produce `{}` (e.g. clearing a description on an unscheduled agent), the sidecar is `unlink`ed instead of left as a stub.
 - **Wrapper is reinstalled on every start.** Cheap, and keeps the on-disk wrapper in lockstep with whatever ships in the asar.
 - **Manual runs are detached and unrefed.** `child_process.spawn(wrapper, …, { detached: true, stdio: 'ignore' })` then `cp.unref()` — the run survives even if the user quits the app immediately after clicking. The run id is pre-generated and threaded as the wrapper's 5th argv, so the IPC stub's `id` matches what the wrapper writes to disk.

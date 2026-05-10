@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
   Agent,
+  AgentScanIssue,
   CrontabStatus,
   JobRun,
   MissedRun,
@@ -15,6 +16,7 @@ const C = {
   agentsRevealDir: 'agents:reveal-dir',
   agentsSetSchedule: 'agents:set-schedule',
   agentsSetDescription: 'agents:set-description',
+  agentsListIssues: 'agents:list-issues',
   schedListRuns: 'scheduler:list-runs',
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
@@ -37,7 +39,8 @@ const api = {
     setSchedule: (agentId: string, spec: ScheduleSpec | null): Promise<void> =>
       ipcRenderer.invoke(C.agentsSetSchedule, agentId, spec),
     setDescription: (agentId: string, description: string): Promise<void> =>
-      ipcRenderer.invoke(C.agentsSetDescription, agentId, description)
+      ipcRenderer.invoke(C.agentsSetDescription, agentId, description),
+    listIssues: (): Promise<AgentScanIssue[]> => ipcRenderer.invoke(C.agentsListIssues)
   },
   scheduler: {
     listRuns: (jobId?: string): Promise<JobRun[]> => ipcRenderer.invoke(C.schedListRuns, jobId),

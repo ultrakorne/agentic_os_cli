@@ -1,6 +1,6 @@
 import { promises as fs, constants as fsc } from 'fs'
 import { basename, extname, join } from 'path'
-import type { AgentMeta } from '../../shared/scheduler'
+import type { AgentMeta, AgentScanIssue } from '../../shared/scheduler'
 
 const SUPPORTED_EXTS = new Set(['.sh', '.bash', '.zsh', ''])
 const DEFAULT_SECTION = 'Agents'
@@ -96,6 +96,78 @@ async function collectInto(
     const metaPath = join(dir, `${id}${META_SUFFIX}`)
     const meta = await readMeta(metaPath)
     out.push({ id, scriptPath: fullPath, section, metaPath, meta })
+  }
+}
+
+/**
+ * Returns scripts that look like they were *intended* to be agents but were
+ * silently dropped by `scanScripts`. Today: files with a supported extension
+ * (or no extension and a `#!` shebang) that lack the executable bit. Walks
+ * the same top-level + first-level-subdir layout as `scanScripts`.
+ */
+export async function findScanIssues(agentsDir: string): Promise<AgentScanIssue[]> {
+  const issues: AgentScanIssue[] = []
+  await collectIssues(agentsDir, issues)
+
+  let entries: import('fs').Dirent[]
+  try {
+    entries = await fs.readdir(agentsDir, { withFileTypes: true })
+  } catch {
+    return issues
+  }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue
+    if (e.name.startsWith('.')) continue
+    await collectIssues(join(agentsDir, e.name), issues)
+  }
+  issues.sort((a, b) => a.path.localeCompare(b.path))
+  return issues
+}
+
+async function collectIssues(dir: string, issues: AgentScanIssue[]): Promise<void> {
+  let entries: string[]
+  try {
+    entries = await fs.readdir(dir)
+  } catch {
+    return
+  }
+  for (const name of entries) {
+    if (name.startsWith('.')) continue
+    if (name.toLowerCase() === 'readme.md') continue
+    if (name.endsWith(META_SUFFIX)) continue
+
+    const ext = extname(name)
+    if (!SUPPORTED_EXTS.has(ext)) continue
+
+    const fullPath = join(dir, name)
+    let stat: import('fs').Stats
+    try {
+      stat = await fs.stat(fullPath)
+    } catch {
+      continue
+    }
+    if (!stat.isFile()) continue
+    if (await isExecutable(fullPath)) continue
+
+    // No-extension files without a shebang aren't agents — skip silently.
+    if (ext === '' && !(await hasShebang(fullPath))) continue
+
+    issues.push({ kind: 'not-executable', path: fullPath })
+  }
+}
+
+async function hasShebang(path: string): Promise<boolean> {
+  try {
+    const fh = await fs.open(path, 'r')
+    try {
+      const buf = Buffer.alloc(2)
+      const { bytesRead } = await fh.read(buf, 0, 2, 0)
+      return bytesRead === 2 && buf[0] === 0x23 && buf[1] === 0x21
+    } finally {
+      await fh.close()
+    }
+  } catch {
+    return false
   }
 }
 

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { promises as fs } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { scanScripts } from './scanner'
+import { scanScripts, findScanIssues } from './scanner'
 
 let dir: string
 
@@ -195,5 +195,51 @@ describe('scanScripts — reserved id namespace', () => {
     await makeExec(join(dir, 'foo__bar.sh'))
     const scripts = await scanScripts(dir)
     expect(scripts.map((s) => s.id)).toEqual(['foo__bar'])
+  })
+})
+
+describe('findScanIssues — non-executable detection', () => {
+  it('flags a shell-extension file that lacks the executable bit', async () => {
+    const path = join(dir, 'planner.sh')
+    await fs.writeFile(path, '#!/usr/bin/env bash\necho hi\n')
+    const issues = await findScanIssues(dir)
+    expect(issues).toEqual([{ kind: 'not-executable', path }])
+  })
+
+  it('flags non-executable scripts inside first-level subfolders', async () => {
+    const path = join(dir, 'Assistant', 'daily_planner.sh')
+    await fs.mkdir(join(dir, 'Assistant'), { recursive: true })
+    await fs.writeFile(path, '#!/usr/bin/env bash\necho hi\n')
+    const issues = await findScanIssues(dir)
+    expect(issues).toEqual([{ kind: 'not-executable', path }])
+  })
+
+  it('does not flag executable scripts', async () => {
+    await makeExec(join(dir, 'ok.sh'))
+    const issues = await findScanIssues(dir)
+    expect(issues).toEqual([])
+  })
+
+  it('does not flag non-shell files (e.g. .py) — those are out of scope', async () => {
+    await fs.writeFile(join(dir, 'thing.py'), 'print("hi")\n')
+    const issues = await findScanIssues(dir)
+    expect(issues).toEqual([])
+  })
+
+  it('flags only no-extension files that have a #! shebang', async () => {
+    const withShebang = join(dir, 'launcher')
+    const withoutShebang = join(dir, 'datafile')
+    await fs.writeFile(withShebang, '#!/usr/bin/env bash\necho hi\n')
+    await fs.writeFile(withoutShebang, 'just text, not a script')
+    const issues = await findScanIssues(dir)
+    expect(issues.map((i) => i.path)).toEqual([withShebang])
+  })
+
+  it('ignores sidecars, READMEs, and dotfiles', async () => {
+    await fs.writeFile(join(dir, 'foo.meta.json'), '{}')
+    await fs.writeFile(join(dir, 'README.md'), '# notes')
+    await fs.writeFile(join(dir, '.hidden.sh'), '#!/usr/bin/env bash\n')
+    const issues = await findScanIssues(dir)
+    expect(issues).toEqual([])
   })
 })

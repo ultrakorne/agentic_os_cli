@@ -6,6 +6,7 @@ import type { AgentMetaStore } from './agent-meta-store'
 import type { RunsStore } from './runs-store'
 import type {
   Agent,
+  AgentScanIssue,
   CrontabStatus,
   JobRun,
   MissedRun,
@@ -20,7 +21,12 @@ import {
   type SyncResult
 } from './crontab'
 import { detectMissed, missedEqual } from './missed'
-import { scanScripts, ensureAgentsDir, type AgentEntry } from '../agents/scanner'
+import {
+  scanScripts,
+  findScanIssues,
+  ensureAgentsDir,
+  type AgentEntry
+} from '../agents/scanner'
 
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
@@ -39,6 +45,7 @@ const newId = (): string =>
 
 export class SchedulerEngine {
   private entries: AgentEntry[] = []
+  private scanIssues: AgentScanIssue[] = []
   private missed: MissedRun[] = []
   private sweepTimer: NodeJS.Timeout | null = null
   private wrapperOk = false
@@ -85,7 +92,12 @@ export class SchedulerEngine {
   }
 
   async refreshScripts(): Promise<Agent[]> {
-    this.entries = await scanScripts(this.opts.agentsDir)
+    const [entries, issues] = await Promise.all([
+      scanScripts(this.opts.agentsDir),
+      findScanIssues(this.opts.agentsDir)
+    ])
+    this.entries = entries
+    this.scanIssues = issues
     return this.listAgents()
   }
 
@@ -93,6 +105,10 @@ export class SchedulerEngine {
     return this.entries
       .map((e) => entryToAgent(e))
       .sort((a, b) => a.id.localeCompare(b.id))
+  }
+
+  listScanIssues(): AgentScanIssue[] {
+    return this.scanIssues.map((i) => ({ ...i }))
   }
 
   async setSchedule(agentId: string, schedule: ScheduleSpec | null): Promise<void> {

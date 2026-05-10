@@ -8,6 +8,7 @@ function App(): JSX.Element {
   const theme = useApp((s) => s.theme)
   const themes = useApp((s) => s.themes)
   const setTheme = useApp((s) => s.setTheme)
+  const rescanAgents = useApp((s) => s.rescanAgents)
   const runs = useApp((s) => s.runs)
   const agents = useApp((s) => s.agents)
 
@@ -35,6 +36,7 @@ function App(): JSX.Element {
         currentThemeName={theme?.name ?? '...'}
         themes={themes}
         onPick={(id) => void setTheme(id)}
+        onRescan={rescanAgents}
         agentCount={agents.length}
       />
       <Dashboard />
@@ -52,12 +54,14 @@ function TopBar({
   currentThemeName,
   themes,
   onPick,
+  onRescan,
   agentCount
 }: {
   currentThemeId: string | null
   currentThemeName: string
   themes: ThemeSummary[]
   onPick: (id: string) => void
+  onRescan: () => Promise<void>
   agentCount: number
 }): JSX.Element {
   return (
@@ -82,13 +86,14 @@ function TopBar({
 
       <span className="h-5 w-px bg-[var(--color-rule)]" />
 
-      <div className="flex items-baseline gap-2 text-xs">
+      <div className="flex items-baseline gap-3 text-xs">
         <span className="font-display tabular text-base text-[var(--color-cool)] neon-text-soft">
           {agentCount.toString().padStart(2, '0')}
         </span>
         <span className="uppercase tracking-[0.22em] text-[var(--color-fg-dim)]">
           agents online
         </span>
+        <RescanButton onRescan={onRescan} />
       </div>
 
       <div className="ml-auto">
@@ -100,6 +105,34 @@ function TopBar({
         />
       </div>
     </header>
+  )
+}
+
+function RescanButton({ onRescan }: { onRescan: () => Promise<void> }): JSX.Element {
+  const [pending, setPending] = useState(false)
+
+  const click = async (): Promise<void> => {
+    if (pending) return
+    setPending(true)
+    try {
+      await onRescan()
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => void click()}
+      title="rescan agents directory + reload sidecars"
+      aria-busy={pending}
+      className="border border-[var(--color-rule-bright)] px-2 py-0.5 font-display text-[10px] font-bold uppercase text-[var(--color-fg-dim)] transition-colors hover:border-[var(--color-cool)] hover:text-[var(--color-cool)] disabled:opacity-60"
+      style={{ letterSpacing: '0.22em' }}
+      disabled={pending}
+    >
+      {pending ? '…' : 'rescan'}
+    </button>
   )
 }
 

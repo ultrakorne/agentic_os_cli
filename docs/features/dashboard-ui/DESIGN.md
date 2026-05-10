@@ -8,7 +8,7 @@ The dashboard is the product. There is no other screen — no settings, no onboa
 
 ### Top bar
 
-`agentic-os` wordmark, version, agent count, and the active theme name on the right. The theme name is a button — clicking re-runs the loader. Useful when watching is unreliable or when the owner just wants to confirm what's loaded.
+`agentic-os` wordmark, version, agent count, a `rescan` button, and the active theme name on the right. The theme name is a button — clicking re-runs the loader. Useful when watching is unreliable or when the owner just wants to confirm what's loaded. `rescan` re-walks the agents directory and re-reads `<id>.meta.json` sidecars; it's the manual hook for the cases where the engine hasn't picked up a freshly-dropped script or a hand-edited sidecar.
 
 ### Sections
 

@@ -5,6 +5,7 @@ type Action = { label: string; run: () => void; confirm?: boolean }
 
 export function SystemBanner(): JSX.Element | null {
   const status = useApp((s) => s.crontabStatus)
+  const scanIssues = useApp((s) => s.scanIssues)
   const reconcile = useApp((s) => s.reconcileCrontab)
   const rescan = useApp((s) => s.rescanAgents)
   const [pendingConfirm, setPendingConfirm] = useState<string | null>(null)
@@ -44,6 +45,14 @@ export function SystemBanner(): JSX.Element | null {
         tone: 'warn',
         text: 'crontab managed section was edited externally — reconcile will overwrite the managed block',
         action: { label: 'reconcile', run: () => void reconcile(), confirm: true }
+      })
+    }
+  }
+  for (const si of scanIssues) {
+    if (si.kind === 'not-executable') {
+      issues.push({
+        tone: 'warn',
+        text: `${shortPath(si.path)} not executable — chmod +x to enable`
       })
     }
   }
@@ -103,4 +112,9 @@ export function SystemBanner(): JSX.Element | null {
       })}
     </div>
   )
+}
+
+function shortPath(full: string): string {
+  const idx = full.lastIndexOf('/agents/')
+  return idx >= 0 ? full.slice(idx + '/agents/'.length) : full
 }

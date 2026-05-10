@@ -21,7 +21,7 @@ Theme bridges main → renderer via `applyTheme`, which writes `--theme-*` CSS v
 | `src/renderer/src/dashboard/Dashboard.tsx` | Groups agents by section; renders SystemBanner + MissedRunsBanner + cards; opens the editor overlay |
 | `src/renderer/src/dashboard/Section.tsx` | Section header (title + counts + dotted rule) wrapping a card grid |
 | `src/renderer/src/dashboard/AgentCard.tsx` | Card UI + run button + status glyph + missed-count badge + inline launch-error display |
-| `src/renderer/src/dashboard/SystemBanner.tsx` | Top-of-page banner for missing system deps (crontab/python3/wrapper), crontab conflict, orphan count |
+| `src/renderer/src/dashboard/SystemBanner.tsx` | Top-of-page banner for missing system deps (crontab/python3/wrapper), crontab conflict, non-executable agent scripts |
 | `src/renderer/src/dashboard/MissedRunsBanner.tsx` | Top-of-page banner showing recent missed runs with per-row "run now" buttons |
 | `src/renderer/src/dashboard/ScheduleEditor.tsx` | Modal overlay editor: mode toggle, hourly/daily controls, live next-run preview, save/cancel/clear |
 | `src/renderer/src/lib/format.ts` | `describeSpec`, `describeSchedule`, `relativeFromNow`, `formatClock` — pure formatters |
@@ -39,6 +39,7 @@ Section ordering uses a static array (`SECTION_ORDER = ['Agents', 'Daily', 'Engi
 
 - **One open editor at a time.** `selectedId` lives in `<Dashboard>`; clicking a different card swaps which is selected and opens its editor in a centered overlay. Clicking the same card or pressing Escape closes the overlay.
 - **Re-fetch on every scheduler change, no diffing.** The store calls `refresh()` on every `scheduler:changed`. Cheap because everything is in-process IPC and the data is tiny. Avoids a class of "stale view" bugs at the cost of redrawing.
+- **Top-bar `rescan` is the manual discovery trigger.** The agents directory is otherwise scanned only at `engine.start()` and on the existing `EmptyAgents` / `SystemBanner` rescan affordances — nothing watches it live, and the 5-minute sweep is missed-run only. The top-bar button calls `agents:rescan`, which re-runs `engine.refreshScripts()` (re-reading every `<id>.meta.json` sidecar) and broadcasts `scheduler:changed`. Useful after dropping a new script, hand-editing a sidecar, or moving an agent between section folders.
 - **Next-run preview is server-computed.** Both `AgentCard` (for the card's countdown) and `ScheduleEditor` (for the live preview while editing) call `window.api.scheduler.nextRun(spec)`. Croner lives only in the main process; the renderer never depends on it. `useEffect` cancels stale promises with a `cancelled` flag.
 - **Status glyph derives from "most recent run".** `Dashboard` builds `lastRunByJob` from the runs array; the glyph shown is that run's status (running / success / error). If no run exists, the glyph falls back to scheduled (`◇`) vs idle (`·`).
 - **Manual-run errors show inline on the card.** If `runNow` returns a stub with `status === 'error'` (wrapper missing, python3 missing, no script), the card surfaces the message under its description for ~5s, then auto-clears. The runtime errors that would surface only as scheduled-run failures are caught the same way through the runs file watcher.
