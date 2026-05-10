@@ -11,7 +11,7 @@ Mutations all go through `engine.setSchedule(agentId, spec | null)` (which write
 | File | Role |
 |------|------|
 | `resources/wrapper.sh` | Bash run-wrapper invoked by cron and by manual runs; writes `<run-id>.json` + `<run-id>.out`; reinstalled on every app start |
-| `resources/agents/{ping.sh,disk-free.sh,README.md}` | Seed agents copied into `<userData>/data/agents/` on first run |
+| `resources/agents/{ping.sh,README.md}` | Seed agent + README copied into `<userData>/data/agents/` on first run |
 | `src/shared/scheduler.ts` | Public types shared across main/preload/renderer (`Agent`, `AgentMeta`, `JobRun`, `MissedRun`, `CrontabStatus`, `ScheduleSpec`) |
 | `src/main/scheduler/types.ts` | Re-exports shared types for the main-process import path |
 | `src/main/scheduler/spec.ts` | `compileToCron` + default spec constants; pure functions |

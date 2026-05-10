@@ -95,11 +95,10 @@ User-owned scripts. Scanned with this layout:
 
 ```
 data/agents/
-  ping.sh                       → id="ping",      section="Agents"
-  Daily/morning-digest.sh       → id="morning-digest", section="Daily"
-  Engineering/pr-watch.sh       → id="pr-watch",  section="Engineering"
+  ping.sh                       → id="ping",    section="Agents"
+  Other/example.sh              → id="example", section="Other"
   .hidden/ignored.sh            → skipped (dot-prefixed)
-  Daily/sub/too-deep.sh         → skipped (deeper than first level)
+  Other/sub/too-deep.sh         → skipped (deeper than first level)
 ```
 
 IDs must be unique across the whole tree; duplicates are dropped (top-level wins, then alphabetical) with a `[scanner]` console warning.

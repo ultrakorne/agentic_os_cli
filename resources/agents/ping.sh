@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# ping — minimal sample agent. Echoes a timestamp; exits 0.
+# ping — minimal sample agent. Sleeps briefly, then echoes a timestamp.
 # Replace or delete; agentic_os will not regenerate this file.
 
 set -euo pipefail
+sleep 2
 echo "ping at $(date -u +%FT%TZ)"

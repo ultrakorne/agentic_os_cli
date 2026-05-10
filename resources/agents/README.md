@@ -10,11 +10,9 @@ the script's parent directory:
 
 ```
 agents/
-  ping.sh                       → id="ping",       section="Agents"
-  Daily/
-    morning-digest.sh           → id="morning-digest", section="Daily"
-  Engineering/
-    pr-watch.sh                 → id="pr-watch",   section="Engineering"
+  ping.sh                       → id="ping",    section="Agents"
+  Other/
+    example.sh                  → id="example", section="Other"
 ```
 
 `mv` files between folders to reorganize. IDs must be unique across the
@@ -23,7 +21,7 @@ collision; the dashboard keeps the first one it walks (top level wins
 over subfolders, then subfolders alphabetically) and warns about the
 duplicate in the main-process log.
 
-Deeper nesting (`agents/Daily/sub/foo.sh`) is ignored.
+Deeper nesting (`agents/Other/sub/foo.sh`) is ignored.
 
 ## Contract
 
@@ -78,8 +76,8 @@ that `exec`s the real program:
 
 ```bash
 #!/usr/bin/env bash
-# agents/morning-digest.sh
-exec python3 "$HOME/scripts/morning-digest.py" "$@"
+# agents/example.sh
+exec python3 "$HOME/scripts/example.py" "$@"
 ```
 
 `exec` replaces the shell process with the interpreter so the wrapper still
@@ -95,9 +93,9 @@ in `<userData>/data/agents.json`, not next to the script:
 {
   "agents": [
     {
-      "id": "morning-digest",
-      "title": "Morning digest",
-      "description": "Summarize overnight notifications.",
+      "id": "example",
+      "title": "Example",
+      "description": "What this agent does in one line.",
       "schedule": { "kind": "daily", "days": ["mon","tue","wed","thu","fri"], "hour": 9, "minute": 0 },
       "scheduledAt": "2026-05-09T08:30:00.000Z"
     }

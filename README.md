@@ -22,9 +22,9 @@ data/
   agents.json                — schedules + optional title/description
   agents/                    — your scripts (drop files here)
     ping.sh                  → id "ping", section "Agents"
-    Daily/morning-digest.sh  → id "morning-digest", section "Daily"
+    Other/example.sh         → id "example", section "Other"
   workspaces/                — optional per-agent working dirs
-    daily_planner/           → state, prompts, anything an agent reads/writes
+    <name>/                  → state, prompts, anything an agent reads/writes
   runs/                      — one <run-id>.json + <run-id>.out per run
   wrapper.sh                 — refreshed from the bundle on every app start
 ```
@@ -51,8 +51,7 @@ full contract.
 If an agent needs a working directory — prompt files, state it reads/writes,
 caches, anything bigger than a one-liner — drop a folder under
 `data/workspaces/<name>/` and reference it from the script. Many agents
-don't need one (`ping`, `disk-free`, anything purely stateless); skip it
-when you don't.
+don't need one (`ping`, anything purely stateless); skip it when you don't.
 
 ## Wrapper environment
 
