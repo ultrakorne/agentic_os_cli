@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, type JSX } from 'react'
 import type { JobRun } from '@shared/scheduler'
+import { useApp } from '../store'
 import { RunRow } from './RunRow'
+import { MissedRunRow } from './MissedRunRow'
 import { FullOutputOverlay } from './FullOutputOverlay'
 
 const PAGE_SIZE = 10
+
+type Item =
+  | { kind: 'run'; key: string; sortAt: string; run: JobRun }
+  | { kind: 'missed'; key: string; sortAt: string; expectedAt: string }
 
 type Props = {
   agentId: string
@@ -16,6 +22,12 @@ export function RunHistoryList({ agentId }: Props): JSX.Element {
   const [loadingRunId, setLoadingRunId] = useState<string | null>(null)
   const [outputs, setOutputs] = useState<Record<string, string>>({})
   const [fullViewRunId, setFullViewRunId] = useState<string | null>(null)
+
+  const missed = useApp((s) => s.missed)
+  const missedForAgent = useMemo(
+    () => missed.filter((m) => m.agentId === agentId),
+    [missed, agentId]
+  )
 
   const refresh = useCallback(async (): Promise<void> => {
     const next = await window.api.scheduler.listRuns(agentId)
@@ -51,11 +63,29 @@ export function RunHistoryList({ agentId }: Props): JSX.Element {
     setFullViewRunId(null)
   }, [agentId])
 
-  const totalPages = Math.max(1, Math.ceil(runs.length / PAGE_SIZE))
+  const items = useMemo<Item[]>(() => {
+    const runItems: Item[] = runs.map((r) => ({
+      kind: 'run',
+      key: `run:${r.id}`,
+      sortAt: r.startedAt,
+      run: r
+    }))
+    const missedItems: Item[] = missedForAgent.map((m) => ({
+      kind: 'missed',
+      key: `missed:${m.expectedAt}`,
+      sortAt: m.expectedAt,
+      expectedAt: m.expectedAt
+    }))
+    return [...runItems, ...missedItems].sort((a, b) =>
+      b.sortAt.localeCompare(a.sortAt)
+    )
+  }, [runs, missedForAgent])
+
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages - 1)
   const slice = useMemo(
-    () => runs.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE),
-    [runs, safePage]
+    () => items.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE),
+    [items, safePage]
   )
 
   const handleToggle = async (run: JobRun): Promise<void> => {
@@ -89,10 +119,18 @@ export function RunHistoryList({ agentId }: Props): JSX.Element {
           style={{ letterSpacing: '0.22em' }}
         >
           {runs.length} {runs.length === 1 ? 'run' : 'runs'}
+          {missedForAgent.length > 0 && (
+            <>
+              <span className="px-1.5 text-[var(--color-rule-bright)]">·</span>
+              <span className="text-[var(--color-hot)]">
+                {missedForAgent.length} missed
+              </span>
+            </>
+          )}
         </span>
       </div>
 
-      {runs.length === 0 ? (
+      {items.length === 0 ? (
         <div className="border border-dashed border-[var(--color-rule)] py-8 text-center">
           <p
             className="font-display text-[11px] uppercase text-[var(--color-fg-faint)]"
@@ -104,17 +142,21 @@ export function RunHistoryList({ agentId }: Props): JSX.Element {
       ) : (
         <>
           <div className="flex flex-col gap-1.5">
-            {slice.map((run) => (
-              <RunRow
-                key={run.id}
-                run={run}
-                expanded={expandedRunId === run.id}
-                output={outputs[run.id] ?? null}
-                loading={loadingRunId === run.id}
-                onToggle={() => void handleToggle(run)}
-                onViewFull={() => setFullViewRunId(run.id)}
-              />
-            ))}
+            {slice.map((item) =>
+              item.kind === 'missed' ? (
+                <MissedRunRow key={item.key} expectedAt={item.expectedAt} />
+              ) : (
+                <RunRow
+                  key={item.key}
+                  run={item.run}
+                  expanded={expandedRunId === item.run.id}
+                  output={outputs[item.run.id] ?? null}
+                  loading={loadingRunId === item.run.id}
+                  onToggle={() => void handleToggle(item.run)}
+                  onViewFull={() => setFullViewRunId(item.run.id)}
+                />
+              )
+            )}
           </div>
 
           {totalPages > 1 && (
