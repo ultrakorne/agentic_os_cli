@@ -81,6 +81,14 @@ PY
 START="$(iso_now)"
 write_meta running "" ""
 
+# On macOS, scripts that arrived via download/scp/airdrop carry a
+# `com.apple.quarantine` xattr and Gatekeeper blocks the interpreter with
+# "bad interpreter: Operation not permitted". Strip it before exec; on
+# Linux there's no xattr binary and the redirect makes it a no-op.
+if [ "$(uname)" = "Darwin" ] && command -v xattr >/dev/null 2>&1; then
+  xattr -d com.apple.quarantine "$SCRIPT" 2>/dev/null || true
+fi
+
 # exec the script directly so its shebang picks the interpreter
 # (the scanner enforces +x, so this works for any language).
 "$SCRIPT" >"$OUT" 2>&1
