@@ -2,13 +2,13 @@
 
 A Dashboard for your agents
 
-- uses cron to schedule jobs
-- a wrapper scripts that adds metadata about the run to make it easier to rerun missed jobs
+Just uses cron to schedule jobs
 
 ## Architecture
 
+- A wrapper scripts that adds metadata about the run to make it easier to rerun missed jobs
 - Ideally just config and scripts in the filesystem
-- A Cli to provide the minimal glue
+- A Cli to provide the minimal glue (not done yet)
 - A customizeable dashboard just as a view
 
 At the moment the electron app does what the cli will do, I dont like it but it's temporary.
