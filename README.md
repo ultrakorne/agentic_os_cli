@@ -1,8 +1,15 @@
 # Agentic OS
 
 A Dashboard for your agents
-
 Just uses cron to schedule jobs
+
+<img width="975" height="681" alt="agentic os screenshot" src="https://github.com/user-attachments/assets/a8e7f313-a11a-4e98-95ba-87d66d3f92eb" />
+<img width="980" height="727" alt="image" src="https://github.com/user-attachments/assets/d33a82ba-2d0e-45ae-a135-2e5a76735bce" />
+
+## Why?
+
+Not and easy way to rerun / check missed jobs when a machine is not always online
+Claude / Codex app have limited scheduling and it's also tight to one vendor.
 
 ## Architecture
 
