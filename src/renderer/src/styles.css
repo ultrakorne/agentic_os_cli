@@ -57,6 +57,24 @@ body {
   overflow: hidden;
 }
 
+/* draggable title bar — header acts as the window drag region, interactive
+   elements inside opt back out. on macOS, reserve space for the traffic lights
+   that hiddenInset draws over the top-left of the window. */
+.app-titlebar {
+  -webkit-app-region: drag;
+}
+.app-titlebar button,
+.app-titlebar a,
+.app-titlebar input,
+.app-titlebar select,
+.app-titlebar [role="listbox"],
+.app-titlebar [role="option"] {
+  -webkit-app-region: no-drag;
+}
+:root[data-platform="mac"] .app-titlebar {
+  padding-left: 84px;
+}
+
 /* horizon glow + sun bloom */
 body::before {
   content: "";

@@ -65,7 +65,7 @@ function TopBar({
   agentCount: number
 }): JSX.Element {
   return (
-    <header className="bg-frame relative z-[60] flex items-center gap-5 border-b border-[var(--color-rule-bright)] px-5 py-3">
+    <header className="app-titlebar bg-frame relative z-[60] flex items-center gap-5 border-b border-[var(--color-rule-bright)] px-5 py-3">
       <div className="flex items-baseline gap-2">
         <span
           className="font-display text-[18px] font-extrabold uppercase text-[var(--color-hot)] neon-text"
