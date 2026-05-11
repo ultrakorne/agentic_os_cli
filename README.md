@@ -1,12 +1,17 @@
-# agentic-os
+# Agentic OS
 
-Personal desktop dashboard for clickable and scheduled agents. Drop a shell
-script into a folder; it shows up. Give it a schedule; system cron runs it
-whether or not the app is open. Read the run output from the dashboard, your
-terminal, or anywhere else that can `tail` a file.
+A Dashboard for your agents
 
-See [PRODUCT.md](PRODUCT.md) for the product brief and
-[docs/INDEX.md](docs/INDEX.md) for the architecture.
+- uses cron to schedule jobs
+- a wrapper scripts that adds metadata about the run to make it easier to rerun missed jobs
+
+## Architecture
+
+- Ideally just config and scripts in the filesystem
+- A Cli to provide the minimal glue
+- A customizeable dashboard just as a view
+
+At the moment the electron app does what the cli will do, I dont like it but it's temporary.
 
 ## Where things live
 
@@ -22,7 +27,6 @@ data/
   agents.json                — schedules + optional title/description
   agents/                    — your scripts (drop files here)
     ping.sh                  → id "ping", section "Agents"
-    Other/example.sh         → id "example", section "Other"
   workspaces/                — optional per-agent working dirs
     <name>/                  → state, prompts, anything an agent reads/writes
   runs/                      — one <run-id>.json + <run-id>.out per run
@@ -59,13 +63,13 @@ Every agent script is invoked by `wrapper.sh`, which exports a small set of
 env vars so scripts can write portable paths instead of hard-coding the
 platform-specific data root:
 
-| Variable | Value |
-|---|---|
-| `AGENTIC_OS_DATA_DIR` | The data root (`<userData>/data`) |
-| `AGENTIC_OS_AGENT_ID` | Id of the agent being run |
-| `AGENTIC_OS_AGENT_SCRIPT` | Absolute path to the script being run |
-| `AGENTIC_OS_RUN_ID` | Run id (matches the `runs/<id>.{json,out}` filenames) |
-| `AGENTIC_OS_TRIGGER` | `schedule` or `manual` |
+| Variable                  | Value                                                 |
+| ------------------------- | ----------------------------------------------------- |
+| `AGENTIC_OS_DATA_DIR`     | The data root (`<userData>/data`)                     |
+| `AGENTIC_OS_AGENT_ID`     | Id of the agent being run                             |
+| `AGENTIC_OS_AGENT_SCRIPT` | Absolute path to the script being run                 |
+| `AGENTIC_OS_RUN_ID`       | Run id (matches the `runs/<id>.{json,out}` filenames) |
+| `AGENTIC_OS_TRIGGER`      | `schedule` or `manual`                                |
 
 So a script can stay identical across Linux and macOS:
 
@@ -112,7 +116,7 @@ pnpm test         # vitest
 pnpm typecheck    # node + web
 pnpm lint
 pnpm tick         # run engine tick once (out-of-process)
-pnpm build:linux  # also: build:mac, build:win
+pnpm build:linux  # also: build:mac
 ```
 
 Unit tests live next to source as `*.test.ts`.
