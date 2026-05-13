@@ -25,8 +25,18 @@ SCRIPT="$4"
 EXPLICIT_RUN_ID="${5:-}"
 TRIGGER="${AGENTIC_OS_TRIGGER:-schedule}"
 
-# cron's PATH is minimal; give scripts a fighting chance
-export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${PATH:-}"
+# cron's PATH is minimal; inherit the user's interactive shell PATH so tools
+# installed under ~/.local/bin or other custom dirs are findable. `-i` sources
+# rc files (zshrc/bashrc); `-l` alone would only run profile files, which often
+# don't add user bin dirs on macOS. Fall back to a sensible static list if the
+# shell can't be loaded.
+USER_SHELL="${SHELL:-/bin/zsh}"
+SHELL_PATH="$("$USER_SHELL" -ilc 'printf %s "$PATH"' 2>/dev/null || true)"
+if [ -n "$SHELL_PATH" ]; then
+  export PATH="$SHELL_PATH:${PATH:-}"
+else
+  export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${PATH:-}"
+fi
 
 if [ -n "$EXPLICIT_RUN_ID" ]; then
   RUN_ID="$EXPLICIT_RUN_ID"
@@ -99,6 +109,13 @@ if [ "$EC" -eq 0 ]; then
   STATUS="success"
 else
   STATUS="error"
+  # If a failing script produced no output, write a hint to the log so the
+  # dashboard shows something actionable instead of an empty error row. Most
+  # often this is a script that captured everything via $(...) and exited
+  # before replaying it (claude --print errors land on stdout, not stderr).
+  if [ ! -s "$OUT" ]; then
+    printf '[wrapper] script exited %d with no output.\nLikely cause: stdout was captured via $(...) or `cmd` and the script exited before replaying it. Capture stderr too (`$(cmd 2>&1)`) and echo it on failure.\n' "$EC" >"$OUT"
+  fi
 fi
 
 write_meta "$STATUS" "$END" "$EC"
