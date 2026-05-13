@@ -25,18 +25,10 @@ SCRIPT="$4"
 EXPLICIT_RUN_ID="${5:-}"
 TRIGGER="${AGENTIC_OS_TRIGGER:-schedule}"
 
-# cron's PATH is minimal; inherit the user's interactive shell PATH so tools
-# installed under ~/.local/bin or other custom dirs are findable. `-i` sources
-# rc files (zshrc/bashrc); `-l` alone would only run profile files, which often
-# don't add user bin dirs on macOS. Fall back to a sensible static list if the
-# shell can't be loaded.
-USER_SHELL="${SHELL:-/bin/zsh}"
-SHELL_PATH="$("$USER_SHELL" -ilc 'printf %s "$PATH"' 2>/dev/null || true)"
-if [ -n "$SHELL_PATH" ]; then
-  export PATH="$SHELL_PATH:${PATH:-}"
-else
-  export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${PATH:-}"
-fi
+# cron's PATH is minimal; cover the common per-user bin dirs so installed
+# tools like claude (which lands in ~/.local/bin) are findable. Agent scripts
+# needing anything past this are responsible for extending PATH themselves.
+export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${PATH:-}"
 
 if [ -n "$EXPLICIT_RUN_ID" ]; then
   RUN_ID="$EXPLICIT_RUN_ID"
