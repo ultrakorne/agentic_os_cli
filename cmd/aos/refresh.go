@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -86,6 +87,13 @@ func RunRefresh() (RefreshSummary, error) {
 	}
 	sum.Agents = len(scan.Agents)
 	sum.Issues = len(scan.Issues)
+
+	// Rebuild <aos_home>/misses/ so the dashboard's view reflects the agents
+	// it just saw. Failure is non-fatal — the cron block is still the more
+	// important thing to reconcile.
+	if _, err := scheduler.SyncMissesDir(cfg.AosHome, scan.Agents, time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: %v\n", err)
+	}
 
 	entries := make([]crontab.Entry, 0)
 	for _, a := range scan.Agents {
