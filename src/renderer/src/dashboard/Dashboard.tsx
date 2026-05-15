@@ -7,8 +7,9 @@ import { SystemBanner } from './SystemBanner'
 import { MissedRunsBanner } from './MissedRunsBanner'
 
 export function Dashboard(): JSX.Element {
-  const { agents, runs, missed, loading } = useApp()
+  const { agents, runs, missed, loading, status } = useApp()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const cliMissing = status?.cliMissing === true
 
   const grouped = useMemo(() => {
     const map = new Map<string, typeof agents>()
@@ -54,9 +55,9 @@ export function Dashboard(): JSX.Element {
     <main className="relative z-[1] flex-1 overflow-y-auto">
       <div className="mx-auto max-w-6xl space-y-10 px-6 py-8">
         <SystemBanner />
-        <MissedRunsBanner />
+        {cliMissing ? null : <MissedRunsBanner />}
 
-        {agents.length === 0 ? (
+        {cliMissing ? null : agents.length === 0 ? (
           <EmptyAgents />
         ) : (
           grouped.map((g) => {
@@ -98,11 +99,9 @@ export function Dashboard(): JSX.Element {
 }
 
 function EmptyAgents(): JSX.Element {
+  const rescan = useApp((s) => s.rescanAgents)
   const reveal = (): void => {
     void window.api.agents.revealDir()
-  }
-  const rescan = (): void => {
-    void window.api.agents.rescan()
   }
   return (
     <div className="bg-card neon-edge p-8 text-center text-xs">
@@ -127,11 +126,11 @@ function EmptyAgents(): JSX.Element {
         </button>
         <button
           type="button"
-          onClick={rescan}
+          onClick={() => void rescan()}
           className="border border-[var(--color-rule-bright)] px-3 py-1.5 font-display text-[10px] font-bold uppercase text-[var(--color-fg-dim)] transition-all hover:border-[var(--color-cool)] hover:text-[var(--color-cool)]"
           style={{ letterSpacing: '0.24em' }}
         >
-          rescan
+          refresh
         </button>
       </div>
     </div>

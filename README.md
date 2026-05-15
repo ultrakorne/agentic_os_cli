@@ -13,34 +13,53 @@ Claude / Codex app have limited scheduling and it's also tight to one vendor.
 
 ## Architecture
 
-- A wrapper scripts that adds metadata about the run to make it easier to rerun missed jobs
-- Ideally just config and scripts in the filesystem
-- A Cli to provide the minimal glue (not done yet)
-- A customizeable dashboard just as a view
+- A wrapper script that records each run's metadata so missed jobs can be
+  identified and re-run later.
+- All state lives in the filesystem under an `aos_home` directory.
+- The [`aos` CLI](agentic_os_cli/) (Go) owns the runtime: it installs the
+  wrapper, manages the cron block, and ticks the scheduler — so scheduled
+  agents fire whether or not the dashboard is open.
+- The Electron dashboard is a *view*: it reads from `aos_home`, writes
+  per-agent `<id>.meta.json` sidecars, and shells out to `aos refresh`
+  when state changes. If the CLI is not on PATH, the view blocks with an
+  install banner.
 
-At the moment the electron app does what the cli will do, I dont like it but it's temporary.
+## Install
+
+```
+cd agentic_os_cli
+scripts/install.sh           # builds and installs `aos` to ~/.local/bin
+aos init ~/.aos              # create the aos home and seed cron
+```
+
+Then run the dashboard:
+
+```
+pnpm install
+pnpm dev
+```
 
 ## Where things live
 
-All app state lives under one platform-specific data root:
-
-- Linux: `~/.config/agentic-os/data/`
-- macOS: `~/Library/Application Support/agentic-os/data/`
-
-Inside that root:
+All runtime state lives under the `aos_home` you passed to `aos init`
+(e.g. `~/.aos`). The dashboard discovers this path by calling `aos home`.
 
 ```
-data/
-  agents.json                — schedules + optional title/description
+~/.aos/
   agents/                    — your scripts (drop files here)
     ping.sh                  → id "ping", section "Agents"
+    <id>.meta.json           → schedule, description, written by the dashboard
   workspaces/                — optional per-agent working dirs
-    <name>/                  → state, prompts, anything an agent reads/writes
   runs/                      — one <run-id>.json + <run-id>.out per run
-  wrapper.sh                 — refreshed from the bundle on every app start
+  wrapper.sh                 — installed by `aos init`
+  tick.log                   — cron-driven scheduler tick log
 ```
 
-Back up the whole `data/` folder if you want to move to another machine.
+Config:
+
+- `~/.config/aos/config.toml` — points at the aos_home
+
+Back up `aos_home/` to move to another machine.
 
 ## Adding an agent
 
@@ -53,16 +72,15 @@ Back up the whole `data/` folder if you want to move to another machine.
 
 Filename without extension = agent id. Ids must be unique across the whole
 `agents/` tree. Non-shell agents (Python, Node, etc.) work via a one-line
-shim that `exec`s the real interpreter — see
-`data/agents/README.md` (seeded into your data dir on first run) for the
-full contract.
+shim that `exec`s the real interpreter.
 
 ## Workspaces (optional)
 
 If an agent needs a working directory — prompt files, state it reads/writes,
 caches, anything bigger than a one-liner — drop a folder under
-`data/workspaces/<name>/` and reference it from the script. Many agents
-don't need one (`ping`, anything purely stateless); skip it when you don't.
+`<aos_home>/workspaces/<name>/` and reference it from the script. Many
+agents don't need one (`ping`, anything purely stateless); skip it when
+you don't.
 
 ## Wrapper environment
 
@@ -72,7 +90,7 @@ platform-specific data root:
 
 | Variable                  | Value                                                 |
 | ------------------------- | ----------------------------------------------------- |
-| `AGENTIC_OS_DATA_DIR`     | The data root (`<userData>/data`)                     |
+| `AGENTIC_OS_DATA_DIR`     | The aos_home root                                     |
 | `AGENTIC_OS_AGENT_ID`     | Id of the agent being run                             |
 | `AGENTIC_OS_AGENT_SCRIPT` | Absolute path to the script being run                 |
 | `AGENTIC_OS_RUN_ID`       | Run id (matches the `runs/<id>.{json,out}` filenames) |
@@ -83,7 +101,7 @@ So a script can stay identical across Linux and macOS:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-WORKDIR="${AGENTIC_OS_DATA_DIR:-$HOME/.config/agentic-os/data}/workspaces/my_agent"
+WORKDIR="${AGENTIC_OS_DATA_DIR:-$HOME/.aos}/workspaces/my_agent"
 cd "$WORKDIR"
 # ...
 ```
@@ -97,7 +115,7 @@ the script's responsibility.
 
 ## Run logs
 
-Each run produces two files under `data/runs/`:
+Each run produces two files under `<aos_home>/runs/`:
 
 - `<run-id>.json` — meta (status, exit code, started/ended timestamps, trigger)
 - `<run-id>.out` — combined stdout + stderr
@@ -118,12 +136,20 @@ The dashboard surfaces missing requirements in a banner at the top.
 
 ```
 pnpm install      # install
-pnpm dev          # run app
+pnpm dev          # run app (requires `aos` on PATH)
 pnpm test         # vitest
 pnpm typecheck    # node + web
 pnpm lint
-pnpm tick         # run engine tick once (out-of-process)
 pnpm build:linux  # also: build:mac
 ```
 
-Unit tests live next to source as `*.test.ts`.
+CLI development lives under `agentic_os_cli/`:
+
+```
+cd agentic_os_cli
+go test ./...
+go build ./...
+scripts/install.sh
+```
+
+Unit tests live next to source as `*.test.ts` / `*_test.go`.

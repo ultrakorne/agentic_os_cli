@@ -2,9 +2,9 @@ import { create } from 'zustand'
 import type {
   Agent,
   AgentScanIssue,
-  CrontabStatus,
   JobRun,
-  MissedRun
+  MissedRun,
+  SystemStatus
 } from '@shared/scheduler'
 import type { Theme, ThemeSummary } from '@shared/theme'
 import { applyTheme } from './theme'
@@ -14,13 +14,12 @@ type AppState = {
   runs: JobRun[]
   missed: MissedRun[]
   scanIssues: AgentScanIssue[]
-  crontabStatus: CrontabStatus | null
+  status: SystemStatus | null
   theme: Theme | null
   themes: ThemeSummary[]
   loading: boolean
   refresh: () => Promise<void>
   rescanAgents: () => Promise<void>
-  reconcileCrontab: () => Promise<void>
   setTheme: (id: string) => Promise<void>
   init: () => () => void
 }
@@ -30,28 +29,26 @@ export const useApp = create<AppState>((set, get) => ({
   runs: [],
   missed: [],
   scanIssues: [],
-  crontabStatus: null,
+  status: null,
   theme: null,
   themes: [],
   loading: true,
 
   refresh: async () => {
-    const [agents, runs, missed, crontabStatus, scanIssues] = await Promise.all([
+    const [agents, runs, missed, status, scanIssues] = await Promise.all([
       window.api.agents.list(),
       window.api.scheduler.listRuns(),
       window.api.scheduler.listMissed(),
-      window.api.scheduler.crontabStatus(),
+      window.api.scheduler.status(),
       window.api.agents.listIssues()
     ])
-    set({ agents, runs, missed, crontabStatus, scanIssues, loading: false })
+    set({ agents, runs, missed, status, scanIssues, loading: false })
   },
 
+  // Both the top-bar "rescan" and the SystemBanner "reconcile" route through
+  // the CLI: scanning agents and reconciling cron are the same action now.
   rescanAgents: async () => {
-    await window.api.agents.rescan()
-  },
-
-  reconcileCrontab: async () => {
-    await window.api.scheduler.reconcileCrontab()
+    await window.api.scheduler.refresh()
   },
 
   setTheme: async (id: string) => {

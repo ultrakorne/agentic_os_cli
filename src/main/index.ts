@@ -1,22 +1,14 @@
 import { app, shell, BrowserWindow } from 'electron'
-import { join, resolve } from 'path'
+import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { SchedulerEngine } from './scheduler/engine'
+import { AppService } from './service'
 import { AgentMetaStore } from './scheduler/agent-meta-store'
 import { RunsStore } from './scheduler/runs-store'
-import { computeDevTickCommand } from './scheduler/tick-command'
-import { broadcastChange, registerIpc } from './ipc'
-import { createThemeStore } from './theme/loader'
-
-let engine: SchedulerEngine | null = null
-
-function getResourcesDir(): string {
-  if (is.dev) {
-    return resolve(__dirname, '../../resources')
-  }
-  return join(app.getAppPath().replace(/\.asar$/, '.asar.unpacked'), 'resources')
-}
+import { broadcastChange, registerIpc, type ServiceHandle } from './ipc'
+import { createThemeStore, type ThemeStore } from './theme/loader'
+import { resolveAosBin, readAosHome } from './cli'
+import type { SystemStatus } from '../shared/scheduler'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -35,10 +27,7 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => {
-    mainWindow.show()
-  })
-
+  mainWindow.on('ready-to-show', () => mainWindow.show())
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
@@ -51,6 +40,8 @@ function createWindow(): void {
   }
 }
 
+let service: AppService | null = null
+
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.agentic-os')
 
@@ -58,33 +49,13 @@ app.whenReady().then(async () => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  const userData = app.getPath('userData')
-  const dataDir = join(userData, 'data')
-  const agentsDir = join(dataDir, 'agents')
-  const resourcesDir = getResourcesDir()
+  // Theme is independent of the aos CLI — it lives in userData and works even
+  // when aos is missing, so we can paint the "install aos" banner correctly.
+  const themePath = join(app.getPath('userData'), 'theme.json')
+  const themeStore = createThemeStore(themePath)
 
-  const meta = new AgentMetaStore()
-  const runs = new RunsStore(join(dataDir, 'runs'))
-  const tickCommand = is.dev
-    ? computeDevTickCommand({
-        appPath: app.getAppPath(),
-        tickLogPath: join(dataDir, 'tick.log')
-      })
-    : null
-  engine = new SchedulerEngine({
-    meta,
-    runs,
-    dataDir,
-    agentsDir,
-    resourcesDir,
-    tickCommand,
-    onChange: () => broadcastChange()
-  })
-  await engine.start()
-
-  const themeStore = createThemeStore(join(dataDir, 'theme.json'))
-
-  registerIpc(engine, agentsDir, themeStore)
+  const handle = await initService(themeStore)
+  registerIpc(handle)
 
   createWindow()
 
@@ -93,8 +64,55 @@ app.whenReady().then(async () => {
   })
 })
 
+async function initService(themeStore: ThemeStore): Promise<ServiceHandle> {
+  const aosBin = await resolveAosBin()
+  if (!aosBin) {
+    return cliMissingHandle(themeStore, {
+      cliMissing: true,
+      aosBin: null,
+      aosHome: null,
+      lastRefresh: null,
+      lastRefreshError:
+        'aos not found on PATH — run `scripts/install.sh` in agentic_os_cli/'
+    })
+  }
+  const homeRes = await readAosHome(aosBin)
+  if ('error' in homeRes) {
+    return cliMissingHandle(themeStore, {
+      cliMissing: true,
+      aosBin,
+      aosHome: null,
+      lastRefresh: null,
+      lastRefreshError: homeRes.error
+    })
+  }
+
+  const aosHome = homeRes.home
+  const meta = new AgentMetaStore()
+  const runs = new RunsStore(join(aosHome, 'runs'))
+
+  service = new AppService({
+    aosBin,
+    aosHome,
+    meta,
+    runs,
+    onChange: () => broadcastChange()
+  })
+  await service.start()
+  // Reconcile cron on boot so the renderer always sees the current crontab
+  // state (and so a fresh checkout converges without the user clicking
+  // anything). Errors surface in the SystemStatus.lastRefreshError field.
+  void service.refresh()
+
+  return { service, themeStore }
+}
+
+function cliMissingHandle(themeStore: ThemeStore, status: SystemStatus): ServiceHandle {
+  return { service: null, themeStore, cliMissingStatus: status }
+}
+
 app.on('window-all-closed', () => {
-  engine?.stop()
+  service?.stop()
   if (process.platform !== 'darwin') {
     app.quit()
   }

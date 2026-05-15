@@ -49,14 +49,27 @@ export type AgentScanIssue = {
   path: string
 }
 
-export type CrontabStatus = {
-  managed: boolean
-  hasMarkers: boolean
-  conflict: boolean
-  wrapperOk: boolean
-  pythonOk: boolean
-  crontabOk: boolean
-  // null when we can't determine (e.g. pgrep unavailable, Windows).
-  daemonOk: boolean | null
-  error: string | null
+// One-line summary of an `aos refresh` invocation, with each key=value field
+// parsed back into its own property. Strings are kept as raw CLI output (e.g.
+// cron='skipped:no-crontab-bin', daemon='down') so the renderer can branch on
+// the exact cause without re-deriving it.
+export type RefreshSummary = {
+  agents: number
+  scheduled: number
+  issues: number
+  cron: string
+  wrapper: string
+  python3: string
+  daemon: string
+  log: string
+}
+
+// Runtime view of the CLI: if cliMissing the renderer must block all
+// agent-management UI and point the user at the install instructions.
+export type SystemStatus = {
+  cliMissing: boolean
+  aosBin: string | null
+  aosHome: string | null
+  lastRefresh: RefreshSummary | null
+  lastRefreshError: string | null
 }

@@ -4,31 +4,33 @@ Personal desktop dashboard that turns scattered agents, scripts, and skills into
 
 ## Architecture
 
-Agentic OS is a **view over filesystem state**. The renderer reads JSON files under `<userData>/data/` and shows them. Heavy work lives in three layers below the view:
+Agentic OS is a **view over filesystem state**. The runtime lives in the [`aos` CLI](../agentic_os_cli/) (Go); the Electron app reads files from `<aos_home>/` and renders them. Three layers sit below the view:
 
 1. **System cron is the ticker.** Scheduled runs fire from a managed section of the user's crontab, not from a long-lived process inside the app. Schedules survive reboots, app crashes, and weeks of the dashboard never being opened.
-2. **`wrapper.sh` is the executor.** Cron invokes it; it runs the agent script and writes one meta JSON + one `.out` file per run into `<userData>/data/runs/`. Manual "run now" from the UI spawns the same wrapper detached, so cron triggers and click triggers travel the exact same code path.
-3. **An engine tick keeps state coherent.** Re-scans the agents directory (folding in each script's `<id>.meta.json` sidecar), reconciles the managed crontab against the discovered schedules, sweeps for missed runs. The tick currently runs in-process while the GUI is open (every five minutes); it is designed to also be driveable from a single cron line — `*/5 * * * * agentic-os tick` — so the engine stays correct when the app has not been opened in days.
+2. **`wrapper.sh` is the executor.** Cron invokes it; it runs the agent script and writes one meta JSON + one `.out` file per run into `<aos_home>/runs/`. Manual "run now" from the UI spawns the same wrapper detached, so cron triggers and click triggers travel the exact same code path.
+3. **`aos refresh` keeps cron coherent.** Re-scans the agents directory (folding in each script's `<id>.meta.json` sidecar), reconciles the managed crontab against the discovered schedules. Fires from cron itself every 10 minutes via the `__tick__` entry, plus on demand whenever the dashboard mutates a meta file or the user clicks "refresh".
 
 Consequences worth defending:
 
-- **Adding an agent is dropping an executable file** into `<userData>/data/agents/`. No reload, no rebuild, no in-tree registry. The next tick (or next GUI open) picks it up. Scheduling is what makes cron care; until then a script is purely visible, not active.
-- **The view is closeable.** The UI is a way to see and edit; nothing in the runtime contract depends on it being alive.
-- **A future TUI/CLI is just another view over the same files.** Every UI mutates per-agent `<id>.meta.json` sidecars and reads `runs/*.json`; there is no business logic to port.
+- **The CLI owns everything that touches the system.** `wrapper.sh`, the cron block, the tick log — all managed by `aos`. If `aos` is not on PATH, the dashboard renders an install banner and otherwise does nothing.
+- **Adding an agent is dropping an executable file** into `<aos_home>/agents/`. No reload, no rebuild, no in-tree registry. The next tick (or next refresh) picks it up.
+- **The view is closeable.** Cron keeps firing whether or not the dashboard is open.
+- **A future TUI is just another view over the same files.** Every UI mutates per-agent `<id>.meta.json` sidecars and reads `runs/*.json`; there is no business logic to port.
 - **New features default to filesystem first.** Store as JSON, mutate via small focused scripts, render in the view. Reach for renderer-side logic only when the work is genuinely interactive (drag, animation, micro-state).
 
-When in doubt: if a piece of work can run from cron without the app open, it should.
+When in doubt: if a piece of work can run from cron without the app open, it should — and that means it lives in the CLI.
 
 ## Tech Stack
 
+- **Runtime CLI**: Go (`aos`) — wraps cron, owns `wrapper.sh`, manages the managed crontab block, prints the aos_home path via `aos home`.
 - **Shell**: Electron 39 (main + preload + renderer), packaged with electron-vite + electron-builder
 - **Renderer**: React 19 + TypeScript, Zustand for state, Tailwind 4 (CSS-first `@theme`)
-- **Scheduling**: System `cron` is the ticker; the app manages a section of the user's crontab and reads run logs. `croner` is used only for cron-string compilation and `nextRun` calculations.
-- **Run capture**: A bash wrapper script invoked by every cron line (and by every manual "run now") writes one meta JSON + one stdout file per run.
-- **Persistence**: Plain JSON files under Electron's `userData/data/`; user-owned executable scripts under `userData/data/agents/`.
+- **Scheduling**: System `cron` is the ticker; `aos` manages a section of the user's crontab. `croner` is used in the dashboard only for `nextRun` calculations.
+- **Run capture**: A bash wrapper script (`wrapper.sh`, installed by `aos init`) invoked by every cron line and by every manual "run now" writes one meta JSON + one stdout file per run.
+- **Persistence**: Plain JSON files under `<aos_home>/`; user-owned executable scripts under `<aos_home>/agents/`. `aos_home` defaults to wherever you passed to `aos init` (e.g. `~/.aos`).
 - **Theming**: Reads Omarchy's `~/.config/omarchy/current/theme/colors.toml` at runtime, with a watcher
-- **Tests**: Vitest (unit tests live next to the code: `*.test.ts`)
-- **Runtime requirements**: `crontab` (Linux: `cronie` or similar; macOS ships it) and `python3` on PATH.
+- **Tests**: Vitest for the dashboard (`*.test.ts`), `go test` for the CLI (`*_test.go`)
+- **Runtime requirements**: `aos` CLI on PATH, `crontab` (Linux: `cronie` or similar; macOS ships it), and `python3` on PATH.
 
 ## Features
 

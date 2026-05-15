@@ -1,12 +1,12 @@
 import { ipcMain, BrowserWindow, shell } from 'electron'
-import type { ScheduleSpec } from '../shared/scheduler'
+import { join } from 'path'
+import type { ScheduleSpec, SystemStatus } from '../shared/scheduler'
 import type { Theme } from '../shared/theme'
-import type { SchedulerEngine } from './scheduler/engine'
+import type { AppService } from './service'
 import type { ThemeStore } from './theme/loader'
 
 export const IPC = {
   agentsList: 'agents:list',
-  agentsRescan: 'agents:rescan',
   agentsRevealDir: 'agents:reveal-dir',
   agentsSetSchedule: 'agents:set-schedule',
   agentsSetDescription: 'agents:set-description',
@@ -14,10 +14,10 @@ export const IPC = {
   schedListRuns: 'scheduler:list-runs',
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
-  schedCrontabStatus: 'scheduler:crontab-status',
-  schedReconcileCrontab: 'scheduler:reconcile-crontab',
   schedRunNow: 'scheduler:run-now',
   schedNextRun: 'scheduler:next-run',
+  schedRefresh: 'scheduler:refresh',
+  schedStatus: 'scheduler:status',
   schedChanged: 'scheduler:changed',
   themeGet: 'theme:get',
   themeList: 'theme:list',
@@ -25,37 +25,73 @@ export const IPC = {
   themeChanged: 'theme:changed'
 } as const
 
-export function registerIpc(
-  engine: SchedulerEngine,
-  agentsDir: string,
+export type ServiceHandle = {
+  service: AppService | null
   themeStore: ThemeStore
-): void {
-  ipcMain.handle(IPC.agentsList, () => engine.listAgents())
-  ipcMain.handle(IPC.agentsRescan, async () => {
-    const agents = await engine.refreshScripts()
-    broadcastChange()
-    return agents
+  // Populated only when service is null (CLI missing / not initialized).
+  cliMissingStatus?: SystemStatus
+}
+
+// Renderer calls into a null service return either empty data (lists) or
+// throw with this message — the renderer should always check status first
+// and gate the UI off cliMissing=true.
+const NO_CLI = 'aos CLI not configured'
+
+export function registerIpc(handle: ServiceHandle): void {
+  const { service, themeStore } = handle
+
+  ipcMain.handle(IPC.agentsList, () => service?.listAgents() ?? [])
+  ipcMain.handle(IPC.agentsListIssues, () => service?.listScanIssues() ?? [])
+  ipcMain.handle(IPC.agentsRevealDir, () => {
+    if (!service) return ''
+    return shell.openPath(join(service.aosHome, 'agents'))
   })
-  ipcMain.handle(IPC.agentsRevealDir, () => shell.openPath(agentsDir))
   ipcMain.handle(
     IPC.agentsSetSchedule,
-    (_e, agentId: string, spec: ScheduleSpec | null) => engine.setSchedule(agentId, spec)
+    (_e, agentId: string, spec: ScheduleSpec | null) => {
+      if (!service) throw new Error(NO_CLI)
+      return service.setSchedule(agentId, spec)
+    }
   )
   ipcMain.handle(
     IPC.agentsSetDescription,
-    (_e, agentId: string, description: string) => engine.setDescription(agentId, description)
+    (_e, agentId: string, description: string) => {
+      if (!service) throw new Error(NO_CLI)
+      return service.setDescription(agentId, description)
+    }
   )
-  ipcMain.handle(IPC.agentsListIssues, () => engine.listScanIssues())
 
-  ipcMain.handle(IPC.schedListRuns, (_e, jobId?: string) => engine.listRuns(jobId))
-  ipcMain.handle(IPC.schedListMissed, () => engine.listMissed())
-  ipcMain.handle(IPC.schedReadOutput, (_e, runId: string) => engine.readOutput(runId))
-  ipcMain.handle(IPC.schedCrontabStatus, () => engine.crontabStatus())
-  ipcMain.handle(IPC.schedReconcileCrontab, () => engine.reconcileCrontab())
-  ipcMain.handle(IPC.schedRunNow, (_e, agentId: string) => engine.runManually(agentId))
+  ipcMain.handle(IPC.schedListRuns, (_e, jobId?: string) =>
+    service?.listRuns(jobId) ?? []
+  )
+  ipcMain.handle(IPC.schedListMissed, () => service?.listMissed() ?? [])
+  ipcMain.handle(IPC.schedReadOutput, (_e, runId: string) =>
+    service?.readOutput(runId) ?? null
+  )
+  ipcMain.handle(IPC.schedRunNow, (_e, agentId: string) => {
+    if (!service) throw new Error(NO_CLI)
+    return service.runManually(agentId)
+  })
   ipcMain.handle(IPC.schedNextRun, (_e, spec: ScheduleSpec) => {
-    const next = engine.nextRunFor(spec)
+    if (!service) return null
+    const next = service.nextRunFor(spec)
     return next ? next.toISOString() : null
+  })
+  ipcMain.handle(IPC.schedRefresh, () => {
+    if (!service) return null
+    return service.refresh()
+  })
+  ipcMain.handle(IPC.schedStatus, (): SystemStatus => {
+    if (service) return service.status()
+    return (
+      handle.cliMissingStatus ?? {
+        cliMissing: true,
+        aosBin: null,
+        aosHome: null,
+        lastRefresh: null,
+        lastRefreshError: null
+      }
+    )
   })
 
   ipcMain.handle(IPC.themeGet, () => themeStore.load())

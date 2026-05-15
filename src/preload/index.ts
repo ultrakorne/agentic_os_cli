@@ -3,16 +3,16 @@ import { electronAPI } from '@electron-toolkit/preload'
 import type {
   Agent,
   AgentScanIssue,
-  CrontabStatus,
   JobRun,
   MissedRun,
-  ScheduleSpec
+  RefreshSummary,
+  ScheduleSpec,
+  SystemStatus
 } from '../shared/scheduler'
 import type { Theme, ThemeSummary } from '../shared/theme'
 
 const C = {
   agentsList: 'agents:list',
-  agentsRescan: 'agents:rescan',
   agentsRevealDir: 'agents:reveal-dir',
   agentsSetSchedule: 'agents:set-schedule',
   agentsSetDescription: 'agents:set-description',
@@ -20,10 +20,10 @@ const C = {
   schedListRuns: 'scheduler:list-runs',
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
-  schedCrontabStatus: 'scheduler:crontab-status',
-  schedReconcileCrontab: 'scheduler:reconcile-crontab',
   schedRunNow: 'scheduler:run-now',
   schedNextRun: 'scheduler:next-run',
+  schedRefresh: 'scheduler:refresh',
+  schedStatus: 'scheduler:status',
   schedChanged: 'scheduler:changed',
   themeGet: 'theme:get',
   themeList: 'theme:list',
@@ -34,7 +34,6 @@ const C = {
 const api = {
   agents: {
     list: (): Promise<Agent[]> => ipcRenderer.invoke(C.agentsList),
-    rescan: (): Promise<Agent[]> => ipcRenderer.invoke(C.agentsRescan),
     revealDir: (): Promise<string> => ipcRenderer.invoke(C.agentsRevealDir),
     setSchedule: (agentId: string, spec: ScheduleSpec | null): Promise<void> =>
       ipcRenderer.invoke(C.agentsSetSchedule, agentId, spec),
@@ -43,16 +42,17 @@ const api = {
     listIssues: (): Promise<AgentScanIssue[]> => ipcRenderer.invoke(C.agentsListIssues)
   },
   scheduler: {
-    listRuns: (jobId?: string): Promise<JobRun[]> => ipcRenderer.invoke(C.schedListRuns, jobId),
+    listRuns: (jobId?: string): Promise<JobRun[]> =>
+      ipcRenderer.invoke(C.schedListRuns, jobId),
     listMissed: (): Promise<MissedRun[]> => ipcRenderer.invoke(C.schedListMissed),
     readOutput: (runId: string): Promise<string | null> =>
       ipcRenderer.invoke(C.schedReadOutput, runId),
-    crontabStatus: (): Promise<CrontabStatus> => ipcRenderer.invoke(C.schedCrontabStatus),
-    reconcileCrontab: (): Promise<{ wrote: boolean; conflict: boolean; reason?: string }> =>
-      ipcRenderer.invoke(C.schedReconcileCrontab),
-    runNow: (agentId: string): Promise<JobRun> => ipcRenderer.invoke(C.schedRunNow, agentId),
+    runNow: (agentId: string): Promise<JobRun> =>
+      ipcRenderer.invoke(C.schedRunNow, agentId),
     nextRun: (spec: ScheduleSpec): Promise<string | null> =>
       ipcRenderer.invoke(C.schedNextRun, spec),
+    refresh: (): Promise<RefreshSummary | null> => ipcRenderer.invoke(C.schedRefresh),
+    status: (): Promise<SystemStatus> => ipcRenderer.invoke(C.schedStatus),
     onChange: (cb: () => void): (() => void) => {
       const listener = (): void => cb()
       ipcRenderer.on(C.schedChanged, listener)

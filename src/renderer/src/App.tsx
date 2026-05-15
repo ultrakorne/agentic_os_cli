@@ -125,13 +125,13 @@ function RescanButton({ onRescan }: { onRescan: () => Promise<void> }): JSX.Elem
     <button
       type="button"
       onClick={() => void click()}
-      title="rescan agents directory + reload sidecars"
+      title="run aos refresh: rescan agents and reconcile cron"
       aria-busy={pending}
       className="border border-[var(--color-rule-bright)] px-2 py-0.5 font-display text-[10px] font-bold uppercase text-[var(--color-fg-dim)] transition-colors hover:border-[var(--color-cool)] hover:text-[var(--color-cool)] disabled:opacity-60"
       style={{ letterSpacing: '0.22em' }}
       disabled={pending}
     >
-      {pending ? '…' : 'rescan'}
+      {pending ? '…' : 'refresh'}
     </button>
   )
 }

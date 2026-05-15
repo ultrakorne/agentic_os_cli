@@ -202,26 +202,3 @@ async function isExecutable(path: string): Promise<boolean> {
   }
 }
 
-export async function ensureAgentsDir(agentsDir: string, seedFrom: string): Promise<void> {
-  await fs.mkdir(agentsDir, { recursive: true })
-  const existing = await fs.readdir(agentsDir).catch(() => [] as string[])
-  if (existing.length > 0) return
-  let seedEntries: string[]
-  try {
-    seedEntries = await fs.readdir(seedFrom)
-  } catch {
-    return
-  }
-  for (const name of seedEntries) {
-    const src = join(seedFrom, name)
-    const dst = join(agentsDir, name)
-    try {
-      const data = await fs.readFile(src)
-      await fs.writeFile(dst, data)
-      const stat = await fs.stat(src)
-      await fs.chmod(dst, stat.mode)
-    } catch {
-      /* skip un-readable seeds */
-    }
-  }
-}
