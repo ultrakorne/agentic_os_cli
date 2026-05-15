@@ -96,7 +96,7 @@ func TestExtractManagedDuplicateBeginsIsConflict(t *testing.T) {
 // ---------- BuildManagedBlock ----------
 
 func TestBuildManagedBlockTickOnly(t *testing.T) {
-	tick := BuildTickCommand("/data")
+	tick := BuildTickCommand("/usr/local/bin/aos", "/data")
 	out := BuildManagedBlock(nil, "/wrap.sh", "/data", tick)
 	if !strings.HasPrefix(out, BeginMarker+"\n") {
 		t.Errorf("missing begin: %q", out)
@@ -143,8 +143,8 @@ func TestBuildManagedBlockQuotesSingleQuotes(t *testing.T) {
 }
 
 func TestBuildTickCommandShape(t *testing.T) {
-	got := BuildTickCommand("/data dir")
-	want := `aos tick >> '/data dir/tick.log' 2>&1`
+	got := BuildTickCommand("/opt/aos/aos", "/data dir")
+	want := `'/opt/aos/aos' tick >> '/data dir/tick.log' 2>&1`
 	if got != want {
 		t.Errorf("BuildTickCommand = %q, want %q", got, want)
 	}

@@ -18,6 +18,8 @@ go test ./...               # run all tests
 go vet ./...                # static checks
 ```
 
+Install procedure for end users lives in `README.md`.
+
 ## Conventions
 
 - Embedded assets are the source of truth — `aos init` overwrites the on-disk copy if it drifts from `resources.WrapperSh`.

@@ -37,21 +37,20 @@ type RefreshSummary struct {
 	Wrapper   string // ok | missing
 	Python3   string // ok | missing
 	Daemon    string // ok | down | unknown
-	AosPath   string // ok | warn
 	Log       string // trimmed | untouched
 }
 
 func (s RefreshSummary) OneLine() string {
 	return fmt.Sprintf(
-		"aos refresh agents=%d scheduled=%d issues=%d cron=%s wrapper=%s python3=%s daemon=%s aos_on_cron_path=%s log=%s",
-		s.Agents, s.Scheduled, s.Issues, s.Cron, s.Wrapper, s.Python3, s.Daemon, s.AosPath, s.Log,
+		"aos refresh agents=%d scheduled=%d issues=%d cron=%s wrapper=%s python3=%s daemon=%s log=%s",
+		s.Agents, s.Scheduled, s.Issues, s.Cron, s.Wrapper, s.Python3, s.Daemon, s.Log,
 	)
 }
 
 // RunRefresh executes the refresh pipeline in-process. init.go calls this
 // directly after writing the config so we don't shell out to ourselves.
 func RunRefresh() (RefreshSummary, error) {
-	sum := RefreshSummary{Cron: "skipped:unknown", Wrapper: "missing", Python3: "missing", Daemon: "unknown", AosPath: "warn", Log: "untouched"}
+	sum := RefreshSummary{Cron: "skipped:unknown", Wrapper: "missing", Python3: "missing", Daemon: "unknown", Log: "untouched"}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -81,10 +80,6 @@ func RunRefresh() (RefreshSummary, error) {
 	} else {
 		sum.Daemon = "unknown"
 	}
-	if runtime.AosOnCronPath() {
-		sum.AosPath = "ok"
-	}
-
 	scan, err := scheduler.ScanAgents(filepath.Join(cfg.AosHome, "agents"))
 	if err != nil {
 		return sum, fmt.Errorf("scan agents: %w", err)
@@ -111,7 +106,12 @@ func RunRefresh() (RefreshSummary, error) {
 	sum.Scheduled = len(entries)
 
 	if hasCrontab && sum.Wrapper == "ok" && sum.Python3 == "ok" {
-		tickCmd := crontab.BuildTickCommand(cfg.AosHome)
+		aosBin, err := runtime.AosBinaryPath()
+		if err != nil {
+			sum.Cron = "skipped:" + sanitize(err.Error())
+			return sum, nil
+		}
+		tickCmd := crontab.BuildTickCommand(aosBin, cfg.AosHome)
 		result, err := crontab.SyncCrontab(crontab.SyncArgs{
 			Entries:     entries,
 			WrapperPath: wrapperPath,
