@@ -13,8 +13,8 @@ import type {
 } from '../shared/scheduler'
 import { AgentMetaStore } from './scheduler/agent-meta-store'
 import { RunsStore } from './scheduler/runs-store'
+import { MissesStore } from './scheduler/misses-store'
 import { compileToCron } from './scheduler/spec'
-import { detectMissed, missedEqual } from './scheduler/missed'
 import {
   scanScripts,
   findScanIssues,
@@ -82,16 +82,17 @@ export type AppServiceOpts = {
   aosHome: string
   meta: AgentMetaStore
   runs: RunsStore
+  misses: MissesStore
   onChange?: () => void
 }
 
-// Thin service layer for the renderer. Reads agents/runs/missed from the
+// Thin service layer for the renderer. Reads agents/runs/misses from the
 // filesystem, writes meta sidecars, and delegates anything that mutates cron
-// (or anything else system-wide) to the `aos` CLI by spawning it.
+// (or anything else system-wide) to the `aos` CLI by spawning it. The CLI
+// owns the misses/ directory — the dashboard never re-derives it.
 export class AppService {
   private entries: AgentEntry[] = []
   private scanIssues: AgentScanIssue[] = []
-  private missed: MissedRun[] = []
   private lastRefresh: RefreshSummary | null = null
   private lastRefreshError: string | null = null
 
@@ -106,16 +107,19 @@ export class AppService {
   }
 
   async start(): Promise<void> {
-    await this.opts.runs.load()
+    await Promise.all([this.opts.runs.load(), this.opts.misses.load()])
     await this.refreshScripts()
     this.opts.runs.startWatching(() => {
-      void this.handleRunsChanged()
+      this.opts.onChange?.()
     })
-    this.recomputeMissed()
+    this.opts.misses.startWatching(() => {
+      this.opts.onChange?.()
+    })
   }
 
   stop(): void {
     this.opts.runs.stopWatching()
+    this.opts.misses.stopWatching()
   }
 
   async refreshScripts(): Promise<Agent[]> {
@@ -126,7 +130,6 @@ export class AppService {
     ])
     this.entries = entries
     this.scanIssues = issues
-    this.recomputeMissed()
     return this.listAgents()
   }
 
@@ -141,7 +144,7 @@ export class AppService {
   }
 
   listMissed(): MissedRun[] {
-    return this.missed.map((m) => ({ ...m }))
+    return this.opts.misses.list()
   }
 
   listRuns(jobId?: string): JobRun[] {
@@ -195,10 +198,10 @@ export class AppService {
     const entry = this.entries.find((e) => e.id === agentId)
     if (!entry) throw new Error(`unknown agent "${agentId}"`)
     entry.meta = await this.opts.meta.setSchedule(entry.metaPath, schedule)
-    // Schedule changed → cron needs to be reconciled. Fire-and-forget; the
-    // resulting refresh summary will be broadcast as the next change event.
+    // Schedule changed → cron needs to be reconciled and misses recomputed.
+    // Fire-and-forget; aos refresh rewrites <aos_home>/misses, which the
+    // MissesStore picks up via fs.watch.
     void this.refresh()
-    this.recomputeMissed()
     this.opts.onChange?.()
   }
 
@@ -253,19 +256,6 @@ export class AppService {
     return stub
   }
 
-  private recomputeMissed(): void {
-    const agents = this.listAgents()
-    const runs = this.opts.runs.list(undefined, 1000)
-    const next = detectMissed(agents, runs)
-    if (!missedEqual(this.missed, next)) {
-      this.missed = next
-    }
-  }
-
-  private async handleRunsChanged(): Promise<void> {
-    this.recomputeMissed()
-    this.opts.onChange?.()
-  }
 }
 
 function entryToAgent(e: AgentEntry): Agent {

@@ -71,9 +71,17 @@ export const useApp = create<AppState>((set, get) => ({
     const offSched = window.api.scheduler.onChange(() => {
       void get().refresh()
     })
+    // Re-pull on focus so coming back to the app after sleep/wake is instant
+    // instead of waiting for the next aos tick (~10 min) or relying on
+    // fs.watch surviving the suspend.
+    const onFocus = (): void => {
+      void get().refresh()
+    }
+    window.addEventListener('focus', onFocus)
     return () => {
       offTheme()
       offSched()
+      window.removeEventListener('focus', onFocus)
     }
   }
 }))

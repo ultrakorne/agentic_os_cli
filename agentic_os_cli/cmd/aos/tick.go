@@ -48,16 +48,18 @@ func runTick() error {
 		}
 	}
 
-	runs, err := scheduler.LoadRuns(filepath.Join(cfg.AosHome, "runs"))
-	if err != nil {
-		return fmt.Errorf("load runs: %w", err)
+	now := time.Now()
+	missed, missesErr := scheduler.SyncMissesDir(cfg.AosHome, scan.Agents, now)
+	if missesErr != nil {
+		// Don't fail the tick — the runs/cron side of the world is still
+		// authoritative even if the dashboard's misses view is briefly stale.
+		fmt.Fprintf(os.Stderr, "[tick] sync misses: %v\n", missesErr)
 	}
-	missed := scheduler.DetectMissed(scan.Agents, runs, scheduler.DetectOpts{Now: time.Now()})
 
 	state := crontabState(cfg.AosHome, scan.Agents)
 
 	line := fmt.Sprintf("[tick] %s scripts=%d scheduled=%d missed=%d crontab=%s\n",
-		time.Now().UTC().Format(time.RFC3339), len(scan.Agents), scheduled, len(missed), state)
+		now.UTC().Format(time.RFC3339), len(scan.Agents), scheduled, len(missed), state)
 	if err := appendLog(filepath.Join(cfg.AosHome, "tick.log"), line); err != nil {
 		return fmt.Errorf("write tick.log: %w", err)
 	}
