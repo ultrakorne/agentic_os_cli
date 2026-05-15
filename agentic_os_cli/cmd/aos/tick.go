@@ -101,7 +101,11 @@ func crontabState(dataDir string, agents []scheduler.Agent) string {
 			Expression: expr,
 		})
 	}
-	expectedBlock := crontab.BuildManagedBlock(entries, wrapperPath, dataDir, crontab.BuildTickCommand(dataDir))
+	aosBin, err := runtime.AosBinaryPath()
+	if err != nil {
+		return "error(" + sanitize(err.Error()) + ")"
+	}
+	expectedBlock := crontab.BuildManagedBlock(entries, wrapperPath, dataDir, crontab.BuildTickCommand(aosBin, dataDir))
 	actualBlock := crontab.BeginMarker + "\n" + strings.Join(ex.Managed, "\n") + "\n" + crontab.EndMarker
 	if actualBlock == expectedBlock {
 		return "managed"

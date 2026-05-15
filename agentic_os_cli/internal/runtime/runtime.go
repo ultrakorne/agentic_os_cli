@@ -1,8 +1,10 @@
 package runtime
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"golang.org/x/sys/unix"
 )
@@ -21,25 +23,24 @@ func FileExists(path string) bool {
 	return err == nil
 }
 
-// AosOnCronPath reports whether `aos` resolves through the minimal PATH
-// cron daemons typically use. Useful warning at refresh time so the user
-// knows a successful interactive invocation doesn't guarantee the cron
-// invocation will find the binary.
-func AosOnCronPath() bool {
-	cronPath := "/usr/bin:/bin:/usr/local/bin"
-	prev, ok := os.LookupEnv("PATH")
-	if err := os.Setenv("PATH", cronPath); err != nil {
-		return false
+// AosBinaryPath returns the absolute path of the running aos binary, with
+// symlinks resolved. Used to bake an absolute command path into the cron
+// managed block so it works under cron's minimal PATH.
+func AosBinaryPath() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate aos binary: %w", err)
 	}
-	defer func() {
-		if ok {
-			_ = os.Setenv("PATH", prev)
-		} else {
-			_ = os.Unsetenv("PATH")
-		}
-	}()
-	_, err := exec.LookPath("aos")
-	return err == nil
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		// EvalSymlinks fails if the file vanished; fall back to the raw path.
+		resolved = exe
+	}
+	abs, err := filepath.Abs(resolved)
+	if err != nil {
+		return "", fmt.Errorf("absolutize aos path %q: %w", resolved, err)
+	}
+	return abs, nil
 }
 
 // CronDaemonRunning reports whether a cron daemon process appears to be

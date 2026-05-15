@@ -163,10 +163,11 @@ func BuildManagedBlock(entries []Entry, wrapperPath, dataDir, tickCmd string) st
 }
 
 // BuildTickCommand returns the cron command line (after the schedule) for the
-// __tick__ entry. aos must be resolvable on cron's PATH.
-func BuildTickCommand(dataDir string) string {
+// __tick__ entry. aosBin must be the absolute path to the aos binary so the
+// command works under cron's minimal PATH.
+func BuildTickCommand(aosBin, dataDir string) string {
 	logPath := filepath.Join(dataDir, "tick.log")
-	return fmt.Sprintf("aos tick >> %s 2>&1", shellQuote(logPath))
+	return fmt.Sprintf("%s tick >> %s 2>&1", shellQuote(aosBin), shellQuote(logPath))
 }
 
 type SyncArgs struct {
