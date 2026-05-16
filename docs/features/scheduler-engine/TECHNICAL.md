@@ -28,6 +28,12 @@ Mutations all go through `engine.setSchedule(agentId, spec | null)` (which write
 | `src/main/ipc.ts` | Wires engine + theme to `ipcMain.handle`; defines IPC channel constants |
 | `src/main/index.ts` | App boot: builds stores, constructs the engine |
 
+## How this feature uses `aos`
+
+The Electron engine writes the `<id>.meta.json` sidecar in-process (`agent-meta-store.ts`) and then shells out to `aos refresh` to reconcile the managed crontab block. Manual "run now" spawns `wrapper.sh` directly — also installed by the CLI. The renderer is one of two writers of the sidecar contract; the [`aos` CLI](../../../agentic_os_cli/) is the other, used from terminals, scripts, and future TUIs.
+
+What the CLI actually does — its verbs, flags, JSON output shapes, and the sidecar-write rules — is documented inside the CLI repo (see [`agentic_os_cli/docs/`](../../../agentic_os_cli/docs/) and its [`README.md`](../../../agentic_os_cli/README.md)). This document only covers how the Electron app calls into it.
+
 ## Data Model
 
 The on-disk shapes are documented under [data-layout](../data-layout/TECHNICAL.md). The summary:

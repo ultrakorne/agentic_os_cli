@@ -31,14 +31,14 @@ var refreshCmd = &cobra.Command{
 }
 
 type RefreshSummary struct {
-	Agents    int
-	Scheduled int
-	Issues    int
-	Cron      string // wrote | unchanged | skipped:<reason>
-	Wrapper   string // ok | missing
-	Python3   string // ok | missing
-	Daemon    string // ok | down | unknown
-	Log       string // trimmed | untouched
+	Agents    int    `json:"agents"`
+	Scheduled int    `json:"scheduled"`
+	Issues    int    `json:"issues"`
+	Cron      string `json:"cron"`    // wrote | unchanged | skipped:<reason>
+	Wrapper   string `json:"wrapper"` // ok | missing
+	Python3   string `json:"python3"` // ok | missing
+	Daemon    string `json:"daemon"`  // ok | down | unknown
+	Log       string `json:"log"`     // trimmed | untouched
 }
 
 func (s RefreshSummary) OneLine() string {

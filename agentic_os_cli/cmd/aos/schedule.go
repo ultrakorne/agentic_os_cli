@@ -1,0 +1,282 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+
+	"github.com/ultrakorne/aos_cli/internal/config"
+	"github.com/ultrakorne/aos_cli/internal/scheduler"
+)
+
+// schedule flags. The schedule kind is inferred from which flags the user
+// passed — never typed explicitly — so the CLI shape mirrors the sidecar
+// JSON shape one-to-one. Conflicting flags (e.g. --every-hours alongside
+// --hour) are rejected outright rather than picking a winner.
+var (
+	schedEveryHours int
+	schedHour       int
+	schedMinute     int
+	schedDays       string
+	schedOff        bool
+)
+
+// Sentinels for "flag not provided". Cobra doesn't distinguish unset from
+// zero for int flags, so we use Changed() on the FlagSet for that.
+const (
+	schedHourUnset       = -1
+	schedEveryHoursUnset = 0
+)
+
+var scheduleCmd = &cobra.Command{
+	Use:   "schedule <id>",
+	Short: "Set or clear an agent's schedule",
+	Long: `Set or clear an agent's schedule. The kind is inferred from the flags:
+
+  hourly:  --every-hours N --minute M
+  daily:   --hour H --minute M --days mon,tue,wed,thu,fri
+           --hour H --minute M --days mon-fri
+
+Pass --off to clear an existing schedule. After a successful write, cron is
+reconciled in-process (same as ` + "`aos refresh`" + `).`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSchedule,
+}
+
+func runSchedule(cmd *cobra.Command, args []string) error {
+	id := args[0]
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if cfg == nil || cfg.AosHome == "" {
+		return errors.New("aos not initialized — run `aos init <path>` first")
+	}
+
+	agentsDir := filepath.Join(cfg.AosHome, "agents")
+	agent, _, err := scheduler.FindAgentByID(agentsDir, id)
+	if err != nil {
+		return err
+	}
+
+	spec, err := parseSchedFlags(cmd)
+	if err != nil {
+		return err
+	}
+
+	meta, err := scheduler.WriteSchedule(agent.MetaPath, spec, time.Now())
+	if err != nil {
+		return fmt.Errorf("write meta: %w", err)
+	}
+
+	refresh, refErr := RunRefresh()
+	if refErr != nil {
+		// Surface the write but let the user know cron didn't reconcile.
+		fmt.Fprintf(os.Stderr, "warn: refresh after schedule write failed: %v\n", refErr)
+	}
+
+	if JSONOutput() {
+		return printScheduleJSON(agent.ID, meta, refresh, refErr)
+	}
+	return printScheduleHuman(agent.ID, meta, refresh, refErr)
+}
+
+func parseSchedFlags(cmd *cobra.Command) (*scheduler.ScheduleSpec, error) {
+	fs := cmd.Flags()
+	everySet := fs.Changed("every-hours")
+	hourSet := fs.Changed("hour")
+	minuteSet := fs.Changed("minute")
+	daysSet := fs.Changed("days")
+
+	if schedOff {
+		if everySet || hourSet || minuteSet || daysSet {
+			return nil, errors.New("--off cannot be combined with schedule flags")
+		}
+		return nil, nil
+	}
+
+	switch {
+	case everySet && (hourSet || daysSet):
+		return nil, errors.New("--every-hours is for hourly schedules; do not combine with --hour or --days")
+	case everySet:
+		if !minuteSet {
+			return nil, errors.New("hourly schedule requires --minute")
+		}
+		spec := &scheduler.ScheduleSpec{
+			Kind:       "hourly",
+			EveryHours: schedEveryHours,
+			Minute:     schedMinute,
+		}
+		if _, err := scheduler.CompileToCron(*spec); err != nil {
+			return nil, err
+		}
+		return spec, nil
+	case hourSet || daysSet:
+		if !hourSet || !minuteSet || !daysSet {
+			return nil, errors.New("daily schedule requires --hour, --minute, and --days")
+		}
+		days, err := parseDays(schedDays)
+		if err != nil {
+			return nil, err
+		}
+		spec := &scheduler.ScheduleSpec{
+			Kind:   "daily",
+			Days:   days,
+			Hour:   schedHour,
+			Minute: schedMinute,
+		}
+		if _, err := scheduler.CompileToCron(*spec); err != nil {
+			return nil, err
+		}
+		return spec, nil
+	default:
+		return nil, errors.New("provide a schedule (--every-hours / --hour+--days) or --off to clear")
+	}
+}
+
+var weekdayOrder = []scheduler.Weekday{
+	scheduler.Sun, scheduler.Mon, scheduler.Tue, scheduler.Wed,
+	scheduler.Thu, scheduler.Fri, scheduler.Sat,
+}
+
+var weekdayIndex = map[string]int{
+	"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6,
+}
+
+// parseDays accepts a comma list (`mon,wed,fri`) or a single inclusive range
+// (`mon-fri`). Whitespace is tolerated; case is ignored. Duplicate days are
+// folded silently — the cron compiler dedupes anyway.
+func parseDays(raw string) ([]scheduler.Weekday, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return nil, errors.New("--days is empty")
+	}
+	if strings.Contains(s, "-") && !strings.Contains(s, ",") {
+		return parseDayRange(s)
+	}
+	parts := strings.Split(s, ",")
+	out := make([]scheduler.Weekday, 0, len(parts))
+	for _, p := range parts {
+		d, err := parseDay(p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func parseDayRange(s string) ([]scheduler.Weekday, error) {
+	parts := strings.SplitN(s, "-", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid day range %q", s)
+	}
+	from, err := parseDay(parts[0])
+	if err != nil {
+		return nil, err
+	}
+	to, err := parseDay(parts[1])
+	if err != nil {
+		return nil, err
+	}
+	fromIdx := weekdayIndex[string(from)]
+	toIdx := weekdayIndex[string(to)]
+	if fromIdx > toIdx {
+		return nil, fmt.Errorf("day range %q wraps the week (start must precede end)", s)
+	}
+	out := make([]scheduler.Weekday, 0, toIdx-fromIdx+1)
+	for i := fromIdx; i <= toIdx; i++ {
+		out = append(out, weekdayOrder[i])
+	}
+	return out, nil
+}
+
+func parseDay(raw string) (scheduler.Weekday, error) {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	if _, ok := weekdayIndex[s]; !ok {
+		return "", fmt.Errorf("unknown weekday %q (use sun..sat)", raw)
+	}
+	return scheduler.Weekday(s), nil
+}
+
+func printScheduleHuman(id string, meta scheduler.AgentMeta, refresh RefreshSummary, refErr error) error {
+	if meta.Schedule == nil {
+		fmt.Printf("aos schedule id=%s cleared | %s\n", id, refreshLine(refresh, refErr))
+		return nil
+	}
+	cronExpr, _ := scheduler.CompileToCron(*meta.Schedule)
+	switch meta.Schedule.Kind {
+	case "hourly":
+		fmt.Printf("aos schedule id=%s kind=hourly everyHours=%d minute=%d cron=%q scheduledAt=%s | %s\n",
+			id, meta.Schedule.EveryHours, meta.Schedule.Minute, cronExpr, meta.ScheduledAt, refreshLine(refresh, refErr))
+	case "daily":
+		days := joinDays(meta.Schedule.Days)
+		fmt.Printf("aos schedule id=%s kind=daily days=%s hour=%d minute=%d cron=%q scheduledAt=%s | %s\n",
+			id, days, meta.Schedule.Hour, meta.Schedule.Minute, cronExpr, meta.ScheduledAt, refreshLine(refresh, refErr))
+	default:
+		fmt.Printf("aos schedule id=%s kind=%s scheduledAt=%s | %s\n",
+			id, meta.Schedule.Kind, meta.ScheduledAt, refreshLine(refresh, refErr))
+	}
+	return nil
+}
+
+func printScheduleJSON(id string, meta scheduler.AgentMeta, refresh RefreshSummary, refErr error) error {
+	payload := map[string]any{
+		"id":          id,
+		"schedule":    meta.Schedule,
+		"scheduledAt": nullIfEmpty(meta.ScheduledAt),
+	}
+	if meta.Schedule != nil {
+		if cronExpr, err := scheduler.CompileToCron(*meta.Schedule); err == nil {
+			payload["cron"] = cronExpr
+		}
+	}
+	if refErr != nil {
+		payload["refresh"] = map[string]any{"error": refErr.Error()}
+	} else {
+		payload["refresh"] = refresh
+	}
+	buf, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(buf))
+	return nil
+}
+
+func refreshLine(r RefreshSummary, err error) string {
+	if err != nil {
+		return "refresh=error(" + sanitize(err.Error()) + ")"
+	}
+	return r.OneLine()
+}
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func joinDays(days []scheduler.Weekday) string {
+	parts := make([]string, len(days))
+	for i, d := range days {
+		parts[i] = string(d)
+	}
+	return strings.Join(parts, ",")
+}
+
+func init() {
+	scheduleCmd.Flags().IntVar(&schedEveryHours, "every-hours", schedEveryHoursUnset, "hourly cadence in hours (1..12); selects hourly kind")
+	scheduleCmd.Flags().IntVar(&schedHour, "hour", schedHourUnset, "hour of day 0..23; selects daily kind")
+	scheduleCmd.Flags().IntVar(&schedMinute, "minute", 0, "minute of the hour 0..59")
+	scheduleCmd.Flags().StringVar(&schedDays, "days", "", "comma list (mon,wed,fri) or inclusive range (mon-fri); selects daily kind")
+	scheduleCmd.Flags().BoolVar(&schedOff, "off", false, "clear the agent's schedule")
+	rootCmd.AddCommand(scheduleCmd)
+}
