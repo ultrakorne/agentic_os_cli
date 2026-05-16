@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -31,11 +30,14 @@ The trigger is set to "manual" via AGENTIC_OS_TRIGGER so the on-disk record is
 distinguishable from cron-driven runs. The run id is pre-generated here and
 threaded as the wrapper's 5th argv, so the printed stub's id matches the file
 the wrapper writes.`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRun,
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
 	id := args[0]
 	cfg, err := config.Load()
 	if err != nil {
@@ -67,7 +69,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	stub := jobRunStub(runID, agent.ID, startedAt)
 	if JSONOutput() {
-		return printRunJSON(stub)
+		return printJSON(stub)
 	}
 	return printRunHuman(stub)
 }
@@ -91,18 +93,14 @@ func jobRunStub(runID, agentID, startedAt string) map[string]any {
 	}
 }
 
-func printRunJSON(stub map[string]any) error {
-	buf, err := json.MarshalIndent(stub, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(buf))
-	return nil
-}
-
 func printRunHuman(stub map[string]any) error {
-	fmt.Printf("aos run id=%s run=%s status=%s startedAt=%s\n",
-		stub["jobId"], stub["id"], stub["status"], stub["startedAt"])
+	banner("run " + fmt.Sprint(stub["jobId"]))
+	statusS := statusStyle(fmt.Sprint(stub["status"]))
+	printKV([]kvRow{
+		{Key: "run", Value: fmt.Sprint(stub["id"])},
+		{Key: "status", Value: fmt.Sprint(stub["status"]), Style: &statusS},
+		{Key: "startedAt", Value: fmt.Sprint(stub["startedAt"])},
+	})
 	return nil
 }
 

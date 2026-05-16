@@ -1,10 +1,18 @@
 # `aos` command reference
 
 Every command accepts a persistent `--json` flag (defined on `rootCmd`) for
-machine-readable output. Without it, commands print a single human-readable
-line (or a small block) suitable for terminal use. Exit codes follow Unix
-convention: `0` on success, `1` on any error (CLI flag misuse, missing agent,
-sidecar write failure, etc.).
+machine-readable output. Without it, commands print a styled human view
+(tables for listings, key/value blocks for single records) rendered with
+[lipgloss](https://github.com/charmbracelet/lipgloss). Lipgloss auto-detects
+the terminal's color profile and strips styling when stdout isn't a TTY, so
+piping or redirecting these commands still produces clean text. Exit codes
+follow Unix convention: `0` on success, `1` on any error (CLI flag misuse,
+missing agent, sidecar write failure, etc.).
+
+The JSON shape is the contract for clients and agents — it's preserved
+across cosmetic changes to the human output. Two helpers in the CLI keep
+both surfaces consistent: every `--json` branch funnels through `printJSON`
+(two-space indent), and every styled summary uses `printKV` / `newTable`.
 
 ## Verbs at a glance
 
@@ -27,6 +35,7 @@ sidecar write failure, etc.).
 
 ```
 aos init <path>
+aos init <path> --json
 ```
 
 Creates the aos home directory (`<path>`), writes `wrapper.sh` and seed
@@ -36,14 +45,43 @@ crontab block. If a previous home was configured and points elsewhere,
 contents are relocated to the new path (rename when possible,
 copy+remove across filesystems).
 
+**Human output** (styled key/value block):
+
+```
+aos init
+mode     fresh
+home     /home/ultra/Developer/aos_home
+wrapper  wrote
+— refresh —
+agents     2
+scheduled  1
+…
+```
+
+**JSON output:**
+
+```json
+{
+  "mode": "fresh",
+  "home": "/home/ultra/Developer/aos_home",
+  "wrapper": "wrote",
+  "refresh": { "agents": 2, "scheduled": 1, ... }
+}
+```
+
+`mode` is one of `fresh | same | moved | repointed`. `wrapper` is `wrote | same`.
+
 ## `aos home`
 
 ```
 aos home
+aos home --json
 ```
 
-Prints the absolute `aos_home` path on stdout. Exits non-zero if `aos init`
-hasn't run yet. Used by the Electron app to discover where to read from.
+Prints the absolute `aos_home` path on stdout — the human form is the raw
+path (no styling) so existing `$(aos home)/runs` patterns keep working.
+With `--json`, prints `{"home": "<path>"}`. Exits non-zero if `aos init`
+hasn't run yet.
 
 ## `aos refresh`
 
@@ -56,10 +94,22 @@ agent's `<id>.meta.json` sidecar, rebuilds the misses directory, and trims
 `tick.log` if it's too big. Reconciliation is idempotent — running twice in a
 row is a no-op.
 
-**Human output** (one line):
+**Human output** (styled key/value block):
 ```
-aos refresh agents=2 scheduled=1 issues=0 cron=wrote wrapper=ok python3=ok daemon=ok log=untouched
+aos refresh
+agents     2
+scheduled  1
+issues     0
+cron       wrote
+wrapper    ok
+python3    ok
+daemon     ok
+log        untouched
 ```
+
+Health fields (`cron`, `wrapper`, `python3`, `daemon`, `log`) are colored
+green/yellow/red so a degraded install (missing wrapper, cron daemon down,
+etc.) stands out without reading every line.
 
 **JSON output:**
 ```json
@@ -82,12 +132,27 @@ Cron field values: `wrote | unchanged | skipped:<reason>`. Reasons stack
 
 ```
 aos tick
+aos tick --json
 ```
 
 Invoked by cron via the managed `__tick__` line every 10 minutes. Detects
 missed runs, syncs the misses directory, and appends a one-line summary to
-`<aos_home>/tick.log`. Same one-line summary is also written to stdout for
-the cron tail. Not commonly run by hand.
+`<aos_home>/tick.log`. The default stdout form mirrors that log line (so the
+cron tail and `tail -f tick.log` show the same shape); `--json` emits a
+`TickSummary` record for programmatic consumers:
+
+```json
+{
+  "timestamp": "2026-05-16T13:00:00Z",
+  "scripts": 2,
+  "scheduled": 1,
+  "missed": 0,
+  "crontab": "managed"
+}
+```
+
+The `tick.log` line format is unchanged regardless of `--json` — it's a
+separate concern from stdout.
 
 ## `aos list`
 
@@ -99,14 +164,18 @@ Enumerates every agent visible under `<aos_home>/agents/`. Top-level scripts
 fall under section `"Agents"`; first-level subdirectory names become section
 names. Duplicate ids are dropped (first-wins) and surfaced as issues.
 
-**Human output** is a tab-separated table:
+**Human output** is a styled lipgloss table:
 ```
-ID             SECTION    SCHEDULE                   DESCRIPTION
-daily_planner  assistant  -                          What did I do yesterday...
-ping           Agents     mon,tue,wed,thu,fri 23:00  -
+╭───────────────┬───────────┬───────────────────────────┬──────────┬──────────────────┮
+│ ID            │ SECTION   │ SCHEDULE                  │ WARNINGS │ DESCRIPTION      │
+├───────────────┼───────────┼───────────────────────────┼──────────┼──────────────────┤
+│ daily_planner │ assistant │ -                         │ -        │ What did I do... │
+│ ping          │ Agents    │ mon,tue,wed,thu,fri 23:00 │ -        │ -                │
+╰───────────────┴───────────┴───────────────────────────┴──────────┴──────────────────╯
 ```
 
-Issues print to stderr after the table.
+Warnings are colored yellow when non-empty. Issues print to stderr after
+the table.
 
 **JSON output:**
 ```json
@@ -141,9 +210,9 @@ Returns the **full agent record** (same shape as a single item in
 `aos list --json`), not just the description string. With a second positional
 argument, writes the description before printing — empty string clears.
 
-**Human output** (key/value block):
+**Human output** (styled key/value block with a banner):
 ```
-id           ping
+aos describe ping
 section      Agents
 script       /.../agents/ping.sh
 schedule     mon,tue,wed,thu,fri 23:00
@@ -188,14 +257,27 @@ Reverse ranges (`fri-mon`) and range-plus-comma forms (`mon-fri,sun`) are
 rejected. The compiled cron expression uses cron weekday numbering
 (`sun=0..sat=6`).
 
-**Human output** (one line):
+**Human output** (styled key/value block plus the refresh summary):
 ```
-aos schedule id=ping kind=daily days=mon,tue,wed,thu,fri hour=9 minute=0 cron="0 9 * * 1,2,3,4,5" scheduledAt=2026-05-16T... | aos refresh agents=2 scheduled=2 issues=0 cron=wrote ...
+aos schedule ping
+kind         daily
+days         mon,tue,wed,thu,fri
+hour         9
+minute       0
+cron         0 9 * * 1,2,3,4,5
+scheduledAt  2026-05-16T...
+— refresh —
+agents     2
+scheduled  2
+…
 ```
 
 For `--off`:
 ```
-aos schedule id=ping cleared | aos refresh ...
+aos schedule ping
+schedule  cleared
+— refresh —
+…
 ```
 
 **JSON output:**
@@ -230,9 +312,12 @@ once the script exits — poll for it (or watch the file) to see the result.
 Errors exit non-zero with the message on stderr: missing agent, wrapper
 absent / not executable.
 
-**Human output** (one line):
+**Human output** (styled key/value block; `status` colored amber):
 ```
-aos run id=ping run=1778936977-29334-... status=running startedAt=2026-05-16T13:09:37.061Z
+aos run ping
+run        1778936977-29334-...
+status     running
+startedAt  2026-05-16T13:09:37.061Z
 ```
 
 **JSON output:** the same shape as `aos runs <run-id> --json` with
@@ -259,19 +344,23 @@ Malformed `<run-id>.json` files are silently skipped (the wrapper writes
 atomically via `mv`, but a concurrent reader can still hit a partial state in
 rare cases).
 
-**Human list output** (table):
+**Human list output** (styled lipgloss table; `STATUS` colored per state):
 ```
-RUN-ID                                AGENT  STATUS   TRIGGER   STARTED                   ELAPSED  EXIT
-1778936977-29334-5144069401071970568  ping   success  manual    2026-05-16T13:09:37.072Z  2.031s   0
-1778878800-542403-1886130594          ping   success  schedule  2026-05-15T21:00:00.090Z  2.029s   0
+╭──────────────────────────────────────┬───────┬─────────┬──────────┬──────────────────────────┬─────────┬──────╮
+│ RUN-ID                               │ AGENT │ STATUS  │ TRIGGER  │ STARTED                  │ ELAPSED │ EXIT │
+├──────────────────────────────────────┼───────┼─────────┼──────────┼──────────────────────────┼─────────┼──────┤
+│ 1778936977-29334-5144069401071970568 │ ping  │ success │ manual   │ 2026-05-16T13:09:37.072Z │ 2.031s  │ 0    │
+│ 1778878800-542403-1886130594         │ ping  │ success │ schedule │ 2026-05-15T21:00:00.090Z │ 2.029s  │ 0    │
+╰──────────────────────────────────────┴───────┴─────────┴──────────┴──────────────────────────┴─────────┴──────╯
 ```
 
+`STATUS` is colored amber (running), green (success), or red (error).
 `ELAPSED` is `...` while the run is still in flight. `EXIT` is `-` until the
 wrapper records an exit code.
 
-**Human single-run output** (key/value block):
+**Human single-run output** (styled key/value block with the run-id as banner):
 ```
-id          1778936977-29334-5144069401071970568
+aos runs 1778936977-29334-...
 agent       ping
 status      success
 trigger     manual
@@ -314,11 +403,34 @@ until the wrapper finishes.
 
 ```
 aos uninstall
+aos uninstall --json
 ```
 
 Removes the managed crontab block, deletes the installed `wrapper.sh`, and
 removes `~/.config/aos/config.toml`. The `agents/` and `runs/` directories
 are **left untouched** — they contain user data.
+
+**Human output** (styled key/value block; each field colored green when
+`removed`, yellow when `skipped:*`, plain otherwise):
+```
+aos uninstall
+wrapper  removed
+cron     removed
+config   removed
+kept     (none)
+```
+
+**JSON output:**
+```json
+{
+  "wrapper": "removed",
+  "cron": "removed",
+  "config": "removed",
+  "kept": []
+}
+```
+
+`kept` lists any `agents/`/`runs/` path that wasn't empty and was preserved.
 
 ---
 

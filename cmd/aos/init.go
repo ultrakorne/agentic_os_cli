@@ -19,11 +19,18 @@ import (
 var initCmd = &cobra.Command{
 	Use:   "init <path>",
 	Short: "Initialize aos with a home path",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	Run:   initFunc,
 }
 
 func initFunc(cmd *cobra.Command, args []string) {
+	if len(args) == 0 {
+		// No <path> given — show usage instead of a terse "accepts 1 arg(s)"
+		// error. Exit 0 because help-on-empty is a deliberate UX, not a flag
+		// misuse.
+		_ = cmd.Help()
+		return
+	}
 	target, err := expandAbs(args[0])
 	if err != nil {
 		fail("resolve target path: %v", err)
@@ -70,7 +77,32 @@ func initFunc(cmd *cobra.Command, args []string) {
 		fail("refresh: %v", err)
 	}
 
-	fmt.Printf("aos init mode=%s home=%s wrapper=%s | %s\n", mode, target, wrapperState, refresh.OneLine())
+	if JSONOutput() {
+		if err := printJSON(map[string]any{
+			"mode":    mode,
+			"home":    target,
+			"wrapper": wrapperState,
+			"refresh": refresh,
+		}); err != nil {
+			fail("emit json: %v", err)
+		}
+		return
+	}
+	printInitHuman(mode, target, wrapperState, refresh)
+}
+
+// printInitHuman emits a small key/value block plus the refresh summary so
+// the user sees both what `init` itself did (relocation mode, wrapper state)
+// and the downstream cron reconciliation in one glance.
+func printInitHuman(mode, target, wrapperState string, refresh RefreshSummary) {
+	banner("init")
+	printKV([]kvRow{
+		{Key: "mode", Value: mode},
+		{Key: "home", Value: target},
+		{Key: "wrapper", Value: wrapperState},
+	})
+	fmt.Println(styleMuted.Render("— refresh —"))
+	printRefreshHuman(refresh)
 }
 
 func expandAbs(p string) (string, error) {

@@ -27,6 +27,18 @@ var tickCmd = &cobra.Command{
 	},
 }
 
+// TickSummary is the structured form of one scheduler tick. The cron-tail
+// line in tick.log keeps its historical "[tick] ..." shape (existing log
+// readers depend on the prefix), but stdout switches between this struct and
+// a styled block depending on --json.
+type TickSummary struct {
+	Timestamp string `json:"timestamp"`
+	Scripts   int    `json:"scripts"`
+	Scheduled int    `json:"scheduled"`
+	Missed    int    `json:"missed"`
+	Crontab   string `json:"crontab"`
+}
+
 func runTick() error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -57,14 +69,28 @@ func runTick() error {
 	}
 
 	state := crontabState(cfg.AosHome, scan.Agents)
+	summary := TickSummary{
+		Timestamp: now.UTC().Format(time.RFC3339),
+		Scripts:   len(scan.Agents),
+		Scheduled: scheduled,
+		Missed:    len(missed),
+		Crontab:   state,
+	}
 
-	line := fmt.Sprintf("[tick] %s scripts=%d scheduled=%d missed=%d crontab=%s\n",
-		now.UTC().Format(time.RFC3339), len(scan.Agents), scheduled, len(missed), state)
-	if err := appendLog(filepath.Join(cfg.AosHome, "tick.log"), line); err != nil {
+	// The on-disk log keeps its historical bracketed shape; tail consumers
+	// (the dashboard's tick.log viewer, ad-hoc grep) parse that line.
+	logLine := fmt.Sprintf("[tick] %s scripts=%d scheduled=%d missed=%d crontab=%s\n",
+		summary.Timestamp, summary.Scripts, summary.Scheduled, summary.Missed, summary.Crontab)
+	if err := appendLog(filepath.Join(cfg.AosHome, "tick.log"), logLine); err != nil {
 		return fmt.Errorf("write tick.log: %w", err)
 	}
-	// Mirror tick.ts's stdout summary so the cron tail makes sense to a human.
-	fmt.Print(line)
+
+	if JSONOutput() {
+		return printJSON(summary)
+	}
+	// Match the log's terse single-line shape — when cron tails this verb,
+	// the operator wants the same string they'd grep for in tick.log.
+	fmt.Print(logLine)
 	return nil
 }
 

@@ -1,14 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"text/tabwriter"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 
 	"github.com/ultrakorne/aos_cli/internal/config"
@@ -58,12 +58,7 @@ func listAllRuns(runsDir string) error {
 		return fmt.Errorf("read runs: %w", err)
 	}
 	if JSONOutput() {
-		buf, err := json.MarshalIndent(map[string]any{"runs": runs}, "", "  ")
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(buf))
-		return nil
+		return printJSON(map[string]any{"runs": runs})
 	}
 	return printRunsHuman(runs)
 }
@@ -82,53 +77,66 @@ func showOneRun(runsDir, runID string) error {
 		return err
 	}
 	if JSONOutput() {
-		buf, err := json.MarshalIndent(run, "", "  ")
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(buf))
-		return nil
+		return printJSON(run)
 	}
 	return printOneRunHuman(run)
 }
 
 func printRunsHuman(runs []scheduler.JobRun) error {
 	if len(runs) == 0 {
-		fmt.Println("(no runs)")
+		fmt.Println(styleMuted.Render("(no runs)"))
 		return nil
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "RUN-ID\tAGENT\tSTATUS\tTRIGGER\tSTARTED\tELAPSED\tEXIT")
+	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, r.JobID, r.Status, r.Trigger,
-			r.StartedAt, elapsedString(r), exitString(r))
+		rows = append(rows, []string{
+			r.ID, r.JobID, string(r.Status), r.Trigger,
+			r.StartedAt, elapsedString(r), exitString(r),
+		})
 	}
-	return w.Flush()
+	t := newTable(
+		[]string{"RUN-ID", "AGENT", "STATUS", "TRIGGER", "STARTED", "ELAPSED", "EXIT"},
+		rows,
+	).StyleFunc(func(row, col int) lipgloss.Style {
+		if row == table.HeaderRow {
+			return tableHeaderStyle
+		}
+		// Column 2 is STATUS — colorize per running/success/error so a long
+		// list scans visually at a glance.
+		if col == 2 {
+			return statusStyle(rows[row][2]).Padding(0, 1)
+		}
+		return tableCellStyle
+	})
+	fmt.Println(t)
+	return nil
 }
 
 func printOneRunHuman(r scheduler.JobRun) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	row := func(k string, v any) {
-		fmt.Fprintf(w, "%s\t%v\n", k, v)
+	banner("runs " + r.ID)
+	statusS := statusStyle(string(r.Status))
+	rows := []kvRow{
+		{Key: "agent", Value: r.JobID},
+		{Key: "status", Value: string(r.Status), Style: &statusS},
+		{Key: "trigger", Value: r.Trigger},
+		{Key: "startedAt", Value: r.StartedAt},
 	}
-	row("id", r.ID)
-	row("agent", r.JobID)
-	row("status", r.Status)
-	row("trigger", r.Trigger)
-	row("startedAt", r.StartedAt)
 	if r.EndedAt != nil && *r.EndedAt != "" {
-		row("endedAt", *r.EndedAt)
+		rows = append(rows, kvRow{Key: "endedAt", Value: *r.EndedAt})
 	}
-	row("elapsed", elapsedString(r))
-	row("exit", exitString(r))
+	rows = append(rows,
+		kvRow{Key: "elapsed", Value: elapsedString(r)},
+		kvRow{Key: "exit", Value: exitString(r)},
+	)
 	if r.OutputPath != nil && *r.OutputPath != "" {
-		row("outputPath", *r.OutputPath)
+		rows = append(rows, kvRow{Key: "outputPath", Value: *r.OutputPath})
 	}
 	if r.Error != nil && *r.Error != "" {
-		row("error", *r.Error)
+		errS := styleErr
+		rows = append(rows, kvRow{Key: "error", Value: *r.Error, Style: &errS})
 	}
-	return w.Flush()
+	printKV(rows)
+	return nil
 }
 
 // elapsedString returns "..." while the run is still in flight (no endedAt)
