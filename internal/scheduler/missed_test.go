@@ -127,6 +127,25 @@ func TestDetectMissed_terminalRunAfterSlotCoversIt(t *testing.T) {
 	}
 }
 
+func TestDetectMissed_ignoresSlotsBeforeScheduledAt(t *testing.T) {
+	// Regression: changing an agent's schedule must not retroactively flag
+	// slots that the *new* spec would have put in the past. WriteSchedule
+	// bumps scheduledAt on every spec change; DetectMissed anchors its
+	// cron-walk at scheduledAt, so any slot ≤ scheduledAt is invisible to
+	// missed-detection. Without this, editing a schedule at 12:15 would
+	// immediately surface a phantom 12:00 miss for the new spec.
+	now := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
+	editedAt := time.Date(2026, 5, 16, 12, 15, 0, 0, time.UTC)
+	// Hourly at :00 — the 12:00 slot is 30 min in the past relative to now,
+	// but 15 min *before* the schedule was set. Must not be flagged.
+	a := hourlyAgent("ping", 0, editedAt)
+
+	out := DetectMissed([]Agent{a}, nil, DetectOpts{Now: now})
+	if len(out) != 0 {
+		t.Fatalf("expected 0 misses (12:00 slot predates scheduledAt 12:15), got %+v", out)
+	}
+}
+
 func TestMissedRunID_isStableAndPortable(t *testing.T) {
 	exp := time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC)
 	got := MissedRunID("ping", exp)
