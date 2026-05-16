@@ -149,12 +149,6 @@ func RunRefresh() (RefreshSummary, error) {
 		fmt.Fprintf(os.Stderr, "warn: %v\n", err)
 	}
 
-	// One-shot cleanup: the legacy <aos_home>/misses/ directory is no longer
-	// managed. Remove it best-effort so the renderer's old MissesStore stops
-	// surfacing stale entries. Safe to call repeatedly — the dir doesn't
-	// come back.
-	_ = os.RemoveAll(filepath.Join(cfg.AosHome, "misses"))
-
 	entries := make([]crontab.Entry, 0)
 	for _, a := range scan.Agents {
 		if a.Meta.Schedule == nil {
