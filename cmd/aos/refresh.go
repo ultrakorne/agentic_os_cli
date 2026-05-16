@@ -142,10 +142,10 @@ func RunRefresh() (RefreshSummary, error) {
 	sum.Agents = len(scan.Agents)
 	sum.Issues = len(scan.Issues)
 
-	// Rebuild <aos_home>/misses/ so the dashboard's view reflects the agents
-	// it just saw. Failure is non-fatal — the cron block is still the more
-	// important thing to reconcile.
-	if _, err := scheduler.SyncMissesDir(cfg.AosHome, scan.Agents, time.Now()); err != nil {
+	// Record any newly-detected missed slots as runs/miss-*.json so the
+	// dashboard sees them in the run history. Failure is non-fatal — the
+	// cron block is still the more important thing to reconcile.
+	if _, err := scheduler.RecordMissedRuns(cfg.AosHome, scan.Agents, time.Now()); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: %v\n", err)
 	}
 

@@ -69,6 +69,10 @@ func statusStyle(status string) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(colorSuccess).Bold(true)
 	case "error":
 		return lipgloss.NewStyle().Foreground(colorError).Bold(true)
+	case "missed":
+		// Use the warning palette: a miss is "needs attention" but not the
+		// same severity as a failed run that actually produced output.
+		return lipgloss.NewStyle().Foreground(colorWarning).Bold(true)
 	default:
 		return styleMuted
 	}

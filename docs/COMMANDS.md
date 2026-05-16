@@ -90,9 +90,10 @@ aos refresh [--json]
 ```
 
 Rescans `<aos_home>/agents/`, recomputes the managed crontab section from each
-agent's `<id>.meta.json` sidecar, rebuilds the misses directory, and trims
-`tick.log` if it's too big. Reconciliation is idempotent — running twice in a
-row is a no-op.
+agent's `<id>.meta.json` sidecar, records any newly-detected missed runs into
+`<aos_home>/runs/` (see `aos tick` and `aos runs` for the miss model), and
+trims `tick.log` if it's too big. Reconciliation is idempotent — running
+twice in a row is a no-op.
 
 **Human output** (styled key/value block):
 ```
@@ -136,10 +137,11 @@ aos tick --json
 ```
 
 Invoked by cron via the managed `__tick__` line every 10 minutes. Detects
-missed runs, syncs the misses directory, and appends a one-line summary to
-`<aos_home>/tick.log`. The default stdout form mirrors that log line (so the
-cron tail and `tail -f tick.log` show the same shape); `--json` emits a
-`TickSummary` record for programmatic consumers:
+the most-recent uncovered scheduled slot per agent and, when one exists,
+persists it as a `runs/miss-<agent>-<expectedAt>.json` record with
+`status:"missed"` so the dashboard's run-history view picks it up like any
+other run. Appends a one-line summary to `<aos_home>/tick.log`. The default
+stdout form mirrors that log line; `--json` emits a `TickSummary` record:
 
 ```json
 {
@@ -150,6 +152,14 @@ cron tail and `tail -f tick.log` show the same shape); `--json` emits a
   "crontab": "managed"
 }
 ```
+
+The `missed` field counts miss records **newly written this tick**, not
+currently outstanding — most ticks emit 0. When a newer uncovered slot is
+detected for an agent that already has a miss record, the older record is
+replaced; only one `miss-*` file per agent exists on disk at any time. The
+deliberate granularity loss (multi-slot outages collapse to one entry) lets
+the dashboard surface "agents currently behind" as a one-row-per-agent
+banner that auto-resolves on the next real run.
 
 The `tick.log` line format is unchanged regardless of `--json` — it's a
 separate concern from stdout.
@@ -389,9 +399,29 @@ rare cases).
 ╰──────────────────────────────────────┴───────┴─────────┴──────────┴──────────────────────────┴─────────┴──────╯
 ```
 
-`STATUS` is colored amber (running), green (success), or red (error).
-`ELAPSED` is `...` while the run is still in flight. `EXIT` is `-` until the
-wrapper records an exit code.
+`STATUS` is colored amber (running), green (success), red (error), or
+yellow (missed). `ELAPSED` is `...` while the run is still in flight and
+`—` for `missed` records (they never ran). `EXIT` is `-` until the wrapper
+records an exit code; `—` for `missed`.
+
+### Missed runs
+
+A run with `status: "missed"` is a scheduled slot the wrapper never fired —
+`aos tick` and `aos refresh` persist these into `<aos_home>/runs/` so they
+appear in the timeline alongside real runs. Shape:
+
+- `id`: `miss-<agentId>-<expectedAt>` (deterministic, ':' replaced with '-'
+  for filesystem portability)
+- `startedAt`: the expected slot (RFC3339), not when the miss was recorded
+- `endedAt`, `exitCode`, `outputPath`, `error`: all `null`
+- `trigger`: `"schedule"`
+- `output`: `""` — there is no `.out` file for a missed run; `aos runs <id>
+  --output` prints nothing
+
+Only **one** miss record per agent exists on disk at any time. When a newer
+uncovered slot is detected, the previous miss for that agent is deleted and
+replaced — multi-slot outages deliberately collapse to one entry so the
+dashboard's "agents currently behind" banner is one row per agent.
 
 **Human single-run output** (styled key/value block with the run-id as banner):
 ```

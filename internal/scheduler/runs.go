@@ -17,6 +17,11 @@ const (
 	StatusRunning RunStatus = "running"
 	StatusSuccess RunStatus = "success"
 	StatusError   RunStatus = "error"
+	// StatusMissed marks a scheduled slot the wrapper never fired. Recorded
+	// by `aos tick` / `aos refresh`, with startedAt = the expected slot and
+	// endedAt = nil. Only the latest uncovered slot per agent is persisted;
+	// see internal/scheduler/missed_record.go.
+	StatusMissed RunStatus = "missed"
 )
 
 // JobRun mirrors the on-disk wrapper output and the renderer's shared/JobRun
