@@ -2,7 +2,7 @@
 
 ## Overview
 
-The scheduler is a **viewer and editor on top of the system's cron**. The Electron app does not run a ticker of its own; it generates a managed section in the user's crontab, and a small wrapper script invoked by cron records each run to disk. When the app launches (and every five minutes while open) it cross-references expected ticks against actual runs to detect what didn't fire.
+The scheduler is a **viewer and editor on top of the system's cron**. The Electron app does not run a ticker of its own; it generates a managed section in the user's crontab, and a small wrapper script invoked by cron records each run to disk. A separate `aos tick` cron entry (every 10 minutes) cross-references expected ticks against actual runs and persists the most-recent uncovered slot per agent as a `JobRun{status:"missed"}` record — the app just reads the runs directory.
 
 This shape gets us three properties cleanly: (1) schedules fire even when the app is closed, (2) missed runs are visible, (3) "agent" stays a thin concept — any executable shell script the owner drops into `<userData>/data/agents/`.
 

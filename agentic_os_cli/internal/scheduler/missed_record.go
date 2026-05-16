@@ -39,7 +39,14 @@ func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRu
 		return nil, fmt.Errorf("mkdir runs: %w", err)
 	}
 
-	runs, _ := LoadRuns(runsDir)
+	// Surface a LoadRuns error rather than swallowing — if the runs dir is
+	// unreadable (permission denied, etc.) we'd otherwise treat it as empty
+	// and re-record misses every tick. LoadRuns already handles ErrNotExist
+	// internally, so a clean install with no runs/ yet still returns (nil, nil).
+	runs, err := LoadRuns(runsDir)
+	if err != nil {
+		return nil, fmt.Errorf("load runs: %w", err)
+	}
 	detected := DetectMissed(agents, runs, DetectOpts{Now: now})
 	if len(detected) == 0 {
 		return nil, nil
