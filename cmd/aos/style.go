@@ -3,10 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/charmbracelet/x/term"
 )
 
 // Shared styling for human (non --json) output. Lipgloss auto-detects the
@@ -82,8 +84,14 @@ func statusStyle(status string) lipgloss.Style {
 // accent border color, and the row-striping StyleFunc used across every
 // listing command. Caller supplies headers + rows and may override the style
 // for individual columns (e.g. status coloring) via SetCellStyleFunc.
+//
+// When stdout is a TTY and the table's natural width would overflow the
+// terminal, the table is sized to the terminal width and Wrap is enabled —
+// lipgloss then word-wraps the widest column(s) into multiple lines instead
+// of breaking the border. Tables that fit comfortably are left tight to
+// content (no stretching).
 func newTable(headers []string, rows [][]string) *table.Table {
-	return table.New().
+	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(colorAccent)).
 		Headers(headers...).
@@ -94,6 +102,54 @@ func newTable(headers []string, rows [][]string) *table.Table {
 			}
 			return tableCellStyle
 		})
+	if termW, ok := stdoutWidth(); ok && tableNaturalWidth(headers, rows) > termW {
+		t = t.Width(termW).Wrap(true)
+	}
+	return t
+}
+
+// stdoutWidth returns the terminal width if stdout is a TTY, or (0, false)
+// when output is piped/redirected (in which case we leave the table tight to
+// content — downstream tools handle their own wrapping).
+func stdoutWidth() (int, bool) {
+	w, _, err := term.GetSize(os.Stdout.Fd())
+	if err != nil || w <= 0 {
+		return 0, false
+	}
+	return w, true
+}
+
+// tableNaturalWidth estimates how wide the table would render without any
+// width constraint: sum of each column's widest cell + 2 chars padding per
+// column + (cols+1) vertical border chars (RoundedBorder draws separators
+// between every column plus the two outer edges). Used to decide whether the
+// table needs wrapping at all.
+func tableNaturalWidth(headers []string, rows [][]string) int {
+	cols := len(headers)
+	if cols == 0 {
+		return 0
+	}
+	maxW := make([]int, cols)
+	for i, h := range headers {
+		if w := lipgloss.Width(h); w > maxW[i] {
+			maxW[i] = w
+		}
+	}
+	for _, row := range rows {
+		for i, cell := range row {
+			if i >= cols {
+				break
+			}
+			if w := lipgloss.Width(cell); w > maxW[i] {
+				maxW[i] = w
+			}
+		}
+	}
+	total := cols*2 + cols + 1 // padding + borders
+	for _, w := range maxW {
+		total += w
+	}
+	return total
 }
 
 // kvRow is one line in a key/value block. Style is optional and applied to the
