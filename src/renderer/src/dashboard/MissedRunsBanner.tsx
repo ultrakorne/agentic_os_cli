@@ -8,7 +8,6 @@ const SHOW = 3
 // An agent shows up here iff its most-recent run is status:"missed".
 // That collapses an outage of many slots into one banner row per agent and
 // auto-clears the row the moment a new run (manual or scheduled) lands.
-// See agentic_os_cli/MISSES_AS_RUNS_PLAN.md.
 function selectBehindAgents(runs: JobRun[]): JobRun[] {
   const latestPerAgent = new Map<string, JobRun>()
   for (const r of runs) {

@@ -66,7 +66,7 @@ Owner clicks `[run]`. The engine spawns the wrapper as a detached process with t
 
 The dashboard reads the runs directory like any other timeline. The banner derives from "the latest run per agent has `status === 'missed'`", so it shows one row per behind-schedule agent and clears the moment a real run lands (manual or scheduled). The previous miss record stays in the agent's run history as a record of the outage. No auto-fire — cron is the source of truth and the user decides whether the slot is still worth re-running.
 
-See `agentic_os_cli/MISSES_AS_RUNS_PLAN.md` for why only the latest miss is kept on disk (we trade granularity in long outages for a one-row-per-agent banner that auto-resolves).
+The latest-only invariant is deliberate: multi-slot outages (e.g. a weekly agent missed during a 3-week machine downtime) collapse to one record, not many. We trade granularity for a one-row-per-agent banner that auto-resolves and a history view that doesn't get drowned in `miss-*` entries during a long gap.
 
 ### Reconcile a tampered crontab
 

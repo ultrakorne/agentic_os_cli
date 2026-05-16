@@ -12,7 +12,7 @@ On `AppService.start()` the main process (1) loads the runs watcher, (2) shells 
 |------|------|
 | `src/shared/scheduler.ts` | Public types shared across main/preload/renderer (`Agent`, `AgentMeta`, `JobRun`, `JobRunStatus`, `ScheduleSpec`, `RefreshSummary`). `JobRunStatus` includes `'missed'` — missed scheduled slots are persisted as `JobRun` records by the CLI rather than tracked in a separate store |
 | `src/main/scheduler/types.ts` | Re-exports shared types for the main-process import path |
-| `src/main/scheduler/runs-store.ts` | Reader for `runs/<id>.{json,out}`; fs.watch + debounce; lazy output read. Missed slots arrive here as `JobRun{status:"missed"}` entries written by `aos tick` / `aos refresh` (see `agentic_os_cli/MISSES_AS_RUNS_PLAN.md`) |
+| `src/main/scheduler/runs-store.ts` | Reader for `runs/<id>.{json,out}`; fs.watch + debounce; lazy output read. Missed slots arrive here as `JobRun{status:"missed"}` entries written by `aos tick` / `aos refresh` |
 | `src/main/agents/agent-list.ts` | Parses `aos list --json` into the renderer's `Agent[]`; converts `ScheduleSpec` back into CLI flag form for `aos schedule` |
 | `src/main/agents/agent-list.test.ts` | Round-trip tests for the parser and the schedule-to-flags converter |
 | `src/main/service.ts` | `AppService`: in-memory agent cache, shells out to `aos list/schedule/describe/refresh/run` for every mutation (including manual runs) |
@@ -60,7 +60,7 @@ Each cron line carries a trailing `# agentic_os:<agentId>` tag. The tag lets the
 ## Noteworthy Behavior
 
 - **Missed-slot detection lives in the CLI, not the renderer.** `aos tick` (invoked by cron every 10 minutes) and `aos refresh` walk each agent's cron expression forward to find the most-recent uncovered expected slot ≤ now, and persist it as a `JobRun{status:"missed"}` into `<aos_home>/runs/`. The renderer never recomputes — it reads the runs directory.
-- **Only the latest miss per agent is recorded.** When a newer uncovered slot is detected, the previous miss file for that agent is deleted and replaced; at most one `miss-*` record per agent exists on disk at any time. See `agentic_os_cli/MISSES_AS_RUNS_PLAN.md` for the rationale.
+- **Only the latest miss per agent is recorded.** When a newer uncovered slot is detected, the previous miss file for that agent is deleted and replaced; at most one `miss-*` record per agent exists on disk at any time. The deliberate granularity loss (multi-slot outages collapse to one entry) is what lets the dashboard show "agents currently behind" as a one-row-per-agent banner that auto-resolves on the next real run.
 - **A later run clears the "behind" banner.** The dashboard derives its missed-runs banner by taking the latest run per agent and filtering to `status === 'missed'`. A successful manual or scheduled run becomes the new latest for that agent and the banner clears immediately; the historical miss record stays in the run history.
 - **fs.watch is debounced 250ms.** When the wrapper writes the running meta and then the final meta, both events would otherwise re-broadcast. The 5-minute sweep also re-indexes the dir as a safety net.
 - **Output is read lazily.** `RunsStore.list()` returns each run with a tail summary (last 4KB) populated at ingest time; full output is only loaded on `scheduler:read-run-output(runId)`.

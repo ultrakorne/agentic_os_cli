@@ -15,7 +15,7 @@ export type AppServiceOpts = {
 // changes) and proxies every sidecar write through the `aos` CLI. This is
 // the "view" half of the system; the CLI owns the agents tree, the meta
 // sidecars, the managed crontab block, and the runs directory (including
-// `miss-*` records — see MISSES_AS_RUNS_PLAN.md).
+// the `miss-*` records `aos tick` writes for uncovered scheduled slots).
 export class AppService {
   private agents: Agent[] = []
   private lastRefresh: RefreshSummary | null = null

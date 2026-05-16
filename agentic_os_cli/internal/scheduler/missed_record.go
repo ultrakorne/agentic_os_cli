@@ -25,8 +25,10 @@ func MissedRunID(agentID string, expectedAt time.Time) string {
 // RecordMissedRuns persists the latest uncovered slot per agent as a
 // runs/<id>.json with status="missed". At most one miss record per agent
 // exists on disk at any time: when a newer slot is detected, the previous
-// miss record for that agent is deleted and replaced. See
-// MISSES_AS_RUNS_PLAN.md "only the latest miss per agent is recorded".
+// miss record for that agent is deleted and replaced. The deliberate
+// granularity loss (multi-slot outages collapse to one entry) is what lets
+// the dashboard show "agents currently behind" as a one-row-per-agent
+// banner that auto-resolves on the next real run.
 //
 // Returns the slice of misses actually written this call (zero when every
 // detected miss already has a matching file on disk). aos tick / aos

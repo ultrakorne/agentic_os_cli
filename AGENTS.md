@@ -19,7 +19,7 @@ A view over filesystem state: the `aos` CLI installs `wrapper.sh` and a managed 
   - `cli.ts` — locates the `aos` binary on PATH and calls `aos home --json`
   - `exec.ts` — shared `execCapture(bin, args)` child-process helper
   - `agents/agent-list.ts` — parses `aos list --json` into the renderer's `Agent[]`; also formats `aos schedule` flags
-  - `scheduler/runs-store.ts` — watches `<aos_home>/runs/` and asks `aos runs --json --limit N` for the snapshot; `.out` reads stay as plain `fs.readFile` (view-only). Missed scheduled slots show up here as `JobRun{status:"missed"}` entries — there is no separate misses store (see `agentic_os_cli/MISSES_AS_RUNS_PLAN.md`)
+  - `scheduler/runs-store.ts` — watches `<aos_home>/runs/` and asks `aos runs --json --limit N` for the snapshot; `.out` reads stay as plain `fs.readFile` (view-only). Missed scheduled slots show up here as `JobRun{status:"missed"}` entries written by `aos tick` — there is no separate misses store
   - `theme/`, `ipc.ts`
 - `src/preload/` — context bridge
 - `src/renderer/src/` — React 19 + Zustand + Tailwind 4 dashboard

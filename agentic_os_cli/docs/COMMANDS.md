@@ -156,8 +156,10 @@ stdout form mirrors that log line; `--json` emits a `TickSummary` record:
 The `missed` field counts miss records **newly written this tick**, not
 currently outstanding — most ticks emit 0. When a newer uncovered slot is
 detected for an agent that already has a miss record, the older record is
-replaced (only one `miss-*` file per agent exists on disk at any time; see
-`MISSES_AS_RUNS_PLAN.md` for the rationale).
+replaced; only one `miss-*` file per agent exists on disk at any time. The
+deliberate granularity loss (multi-slot outages collapse to one entry) lets
+the dashboard surface "agents currently behind" as a one-row-per-agent
+banner that auto-resolves on the next real run.
 
 The `tick.log` line format is unchanged regardless of `--json` — it's a
 separate concern from stdout.
@@ -418,7 +420,8 @@ appear in the timeline alongside real runs. Shape:
 
 Only **one** miss record per agent exists on disk at any time. When a newer
 uncovered slot is detected, the previous miss for that agent is deleted and
-replaced. See `MISSES_AS_RUNS_PLAN.md` for the rationale.
+replaced — multi-slot outages deliberately collapse to one entry so the
+dashboard's "agents currently behind" banner is one row per agent.
 
 **Human single-run output** (styled key/value block with the run-id as banner):
 ```

@@ -15,7 +15,8 @@ export type JobRunTrigger = 'schedule' | 'manual' | 'catch-up'
 // 'missed' is written by `aos tick` / `aos refresh` when a scheduled slot
 // fires while the wrapper isn't running. startedAt holds the expected slot;
 // endedAt, exitCode, outputPath, error are all null. Only one missed record
-// per agent exists at a time — see agentic_os_cli/MISSES_AS_RUNS_PLAN.md.
+// per agent exists at a time — newer misses replace older ones so the
+// dashboard's "behind" banner is one row per agent.
 export type JobRunStatus = 'running' | 'success' | 'error' | 'missed'
 
 export type JobRun = {
