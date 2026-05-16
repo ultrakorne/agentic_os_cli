@@ -17,6 +17,8 @@ sidecar write failure, etc.).
 | [`aos list`](#aos-list) | Enumerate every agent with section, schedule summary, description |
 | [`aos describe <id> [text]`](#aos-describe) | Show one agent's full record; optionally rewrite its description |
 | [`aos schedule <id> ...`](#aos-schedule) | Set or clear an agent's schedule; auto-refreshes cron |
+| [`aos run <id>`](#aos-run) | Fire a manual run; prints the `JobRun` stub |
+| [`aos runs [run-id]`](#aos-runs) | List recent runs, or show one by id (with `--output` to dump the .out) |
 | [`aos uninstall`](#aos-uninstall) | Remove wrapper, managed crontab block, and config |
 
 ---
@@ -211,6 +213,102 @@ When the post-write refresh fails, the schedule write still succeeds and the
 failure is reported as `"refresh": { "error": "..." }` rather than aborting
 the command. The human path prints a `warn:` line to stderr in the same
 case.
+
+## `aos run`
+
+```
+aos run <id>          # spawn a manual run; prints the JobRun stub
+aos run <id> --json
+```
+
+Looks up the agent by id, mints a run id (`<unix>-<pid>-<rand><rand>`),
+spawns `wrapper.sh` detached (`setsid`) with `AGENTIC_OS_TRIGGER=manual` and
+the explicit run id as the wrapper's 5th argv, then prints a `JobRun` stub.
+The wrapper writes the final record under `<aos_home>/runs/<run-id>.json`
+once the script exits — poll for it (or watch the file) to see the result.
+
+Errors exit non-zero with the message on stderr: missing agent, wrapper
+absent / not executable.
+
+**Human output** (one line):
+```
+aos run id=ping run=1778936977-29334-... status=running startedAt=2026-05-16T13:09:37.061Z
+```
+
+**JSON output:** the same shape as `aos runs <run-id> --json` with
+`status: "running"`, `endedAt: null`, `exitCode: null`, `output: ""`. The
+renderer's `JobRun` type (`src/shared/scheduler.ts`) matches one-to-one.
+
+## `aos runs`
+
+```
+aos runs                            # list recent runs, newest first
+aos runs --agent <id>               # filter by agent id
+aos runs --limit N                  # cap result size (default 100; 0 = no limit)
+aos runs --json
+aos runs <run-id>                   # show one run's record
+aos runs <run-id> --json
+aos runs <run-id> --output          # dump the .out file's contents
+```
+
+Reads `<aos_home>/runs/<run-id>.{json,out}` and emits the same shape `aos run`
+writes. Sort is by `startedAt` descending — ISO-8601 timestamps sort
+chronologically as strings.
+
+Malformed `<run-id>.json` files are silently skipped (the wrapper writes
+atomically via `mv`, but a concurrent reader can still hit a partial state in
+rare cases).
+
+**Human list output** (table):
+```
+RUN-ID                                AGENT  STATUS   TRIGGER   STARTED                   ELAPSED  EXIT
+1778936977-29334-5144069401071970568  ping   success  manual    2026-05-16T13:09:37.072Z  2.031s   0
+1778878800-542403-1886130594          ping   success  schedule  2026-05-15T21:00:00.090Z  2.029s   0
+```
+
+`ELAPSED` is `...` while the run is still in flight. `EXIT` is `-` until the
+wrapper records an exit code.
+
+**Human single-run output** (key/value block):
+```
+id          1778936977-29334-5144069401071970568
+agent       ping
+status      success
+trigger     manual
+startedAt   2026-05-16T13:09:37.072Z
+endedAt     2026-05-16T13:09:39.103Z
+elapsed     2.031s
+exit        0
+outputPath  1778936977-29334-5144069401071970568.out
+```
+
+**`--output` form:** dumps the raw `.out` bytes to stdout (no JSON wrapper),
+so it pipes cleanly into `less`, `grep`, etc. Returns empty (no error) when
+the run exists but produced no output yet — running runs lack a `.out` file
+until the wrapper finishes.
+
+**JSON list output:**
+```json
+{
+  "runs": [
+    {
+      "id": "1778936977-29334-...",
+      "jobId": "ping",
+      "scheduleId": null,
+      "trigger": "manual",
+      "startedAt": "2026-05-16T13:09:37.072Z",
+      "endedAt": "2026-05-16T13:09:39.103Z",
+      "status": "success",
+      "output": "",
+      "error": null,
+      "exitCode": 0,
+      "outputPath": "1778936977-29334-....out"
+    }
+  ]
+}
+```
+
+**JSON single-run output:** the inner record only (no `runs` wrapper).
 
 ## `aos uninstall`
 

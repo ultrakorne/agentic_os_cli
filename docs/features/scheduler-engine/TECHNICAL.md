@@ -36,6 +36,8 @@ The main process is a shell-out client. Every mutation goes through the CLI:
 | Description editor save / clear | `aos describe <id> "<text>" --json` | Sidecar-only write; no refresh (descriptions don't affect cron) |
 | Manual run | `aos run <id> --json` | CLI mints the run id, spawns `wrapper.sh` detached with `AGENTIC_OS_TRIGGER=manual`, and prints the `JobRun` stub. Keeps the cron and manual invocation forms of the wrapper in one place so they can't drift |
 
+The renderer still reads runs through the in-process `RunsStore` (fs.watch + 4KB output tail caching for the dashboard's live preview). The same data is available from the terminal via `aos runs [--agent <id>] [--limit N] [--json]` for listing and `aos runs <run-id> [--json|--output]` for single-run records or raw .out dumps — useful for scripting and debugging without opening the UI.
+
 What the CLI actually does — its verbs, flags, JSON output shapes, and the sidecar-write rules — is documented inside the CLI repo (see [`agentic_os_cli/docs/`](../../../agentic_os_cli/docs/) and its [`README.md`](../../../agentic_os_cli/README.md)). This document only covers how the Electron app calls into it.
 
 ## Data Model
