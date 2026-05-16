@@ -19,7 +19,6 @@ const C = {
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
   schedRunNow: 'scheduler:run-now',
-  schedNextRun: 'scheduler:next-run',
   schedRefresh: 'scheduler:refresh',
   schedStatus: 'scheduler:status',
   schedChanged: 'scheduler:changed',
@@ -44,8 +43,6 @@ const api = {
     readOutput: (runId: string): Promise<string | null> =>
       ipcRenderer.invoke(C.schedReadOutput, runId),
     runNow: (agentId: string): Promise<JobRun> => ipcRenderer.invoke(C.schedRunNow, agentId),
-    nextRun: (spec: ScheduleSpec): Promise<string | null> =>
-      ipcRenderer.invoke(C.schedNextRun, spec),
     refresh: (): Promise<RefreshSummary | null> => ipcRenderer.invoke(C.schedRefresh),
     status: (): Promise<SystemStatus> => ipcRenderer.invoke(C.schedStatus),
     onChange: (cb: () => void): (() => void) => {

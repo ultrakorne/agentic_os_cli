@@ -1,75 +1,47 @@
 import { promises as fs, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
+import { execCapture } from '../exec'
 import type { JobRun } from './types'
 
-const DEFAULT_CACHE_LIMIT = 500
+const DEFAULT_LIMIT = 500
 const DEBOUNCE_MS = 250
-const OUTPUT_TAIL_BYTES = 4096
 
-// Disk GC for <aos_home>/runs/ lives in `aos refresh` (internal/runsgc),
-// keeping the "CLI owns everything that touches the system" invariant.
-// The renderer only reads here.
-
+// Read-side cache over `<aos_home>/runs/`. The directory watcher debounces
+// filesystem events and asks `aos runs --json --limit N` for the current
+// snapshot; the CLI owns parsing, normalization, sort order, and any disk
+// hygiene (logtrim/GC). The renderer is a view: we only watch the dir, hold
+// the latest snapshot in memory, and read .out files on demand when a row
+// expands.
 export class RunsStore {
-  private cache = new Map<string, JobRun>()
+  private cache: JobRun[] = []
   private watcher: FSWatcher | null = null
   private debounceTimer: NodeJS.Timeout | null = null
   private onChangeCb: (() => void) | null = null
 
   constructor(
+    private aosBin: string,
     private runsDir: string,
-    private cacheLimit: number = DEFAULT_CACHE_LIMIT
+    private limit: number = DEFAULT_LIMIT
   ) {}
 
   async load(): Promise<void> {
     await fs.mkdir(this.runsDir, { recursive: true })
-    await this.indexRunsDir()
-  }
-
-  private async indexRunsDir(): Promise<void> {
-    let entries: string[]
-    try {
-      entries = await fs.readdir(this.runsDir)
-    } catch {
-      return
-    }
-    for (const name of entries) {
-      if (!name.endsWith('.json')) continue
-      await this.ingestRunFile(name)
-    }
-    this.trimCache()
-  }
-
-  async ingestRunFile(name: string): Promise<void> {
-    const fullPath = join(this.runsDir, name)
-    try {
-      const txt = await fs.readFile(fullPath, 'utf8')
-      const raw = JSON.parse(txt) as Partial<JobRun>
-      if (typeof raw.id !== 'string') return
-      const run = normalizeRun(raw)
-      if (run.status !== 'running' && run.outputPath) {
-        run.output = await readTail(join(this.runsDir, run.outputPath))
-      }
-      this.cache.set(run.id, run)
-    } catch {
-      /* file may have been removed between listing and read */
-    }
+    await this.reindex()
   }
 
   list(jobId?: string, limit = 100): JobRun[] {
-    const out: JobRun[] = []
-    for (const r of this.cache.values()) {
-      if (!jobId || r.jobId === jobId) out.push(r)
-    }
-    out.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-    return out.slice(0, limit).map((r) => ({ ...r }))
+    const filtered = jobId ? this.cache.filter((r) => r.jobId === jobId) : this.cache
+    return filtered.slice(0, limit).map((r) => ({ ...r }))
   }
 
+  // readOutput reads <aos_home>/runs/<run-id>.out (or the path the CLI
+  // recorded in run.outputPath). Plain fs.readFile is fine — the renderer
+  // is a view, reading is not a system mutation.
   async readOutput(runId: string): Promise<string | null> {
-    const cached = this.cache.get(runId)
-    if (!cached?.outputPath) return null
+    const cached = this.cache.find((r) => r.id === runId)
+    const name = cached?.outputPath ?? `${runId}.out`
     try {
-      return await fs.readFile(join(this.runsDir, cached.outputPath), 'utf8')
+      return await fs.readFile(join(this.runsDir, name), 'utf8')
     } catch {
       return null
     }
@@ -106,40 +78,18 @@ export class RunsStore {
   }
 
   private async rescan(): Promise<void> {
-    await this.indexRunsDir()
+    await this.reindex()
     this.onChangeCb?.()
   }
 
-  private trimCache(): void {
-    if (this.cache.size <= this.cacheLimit) return
-    const sorted = [...this.cache.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt))
-    const toRemove = sorted.length - this.cacheLimit
-    for (let i = 0; i < toRemove; i++) this.cache.delete(sorted[i].id)
-  }
-}
-
-function normalizeRun(r: Partial<JobRun>): JobRun {
-  return {
-    id: String(r.id ?? ''),
-    jobId: String(r.jobId ?? ''),
-    scheduleId: r.scheduleId ?? null,
-    trigger: (r.trigger as JobRun['trigger']) ?? 'schedule',
-    startedAt: String(r.startedAt ?? new Date().toISOString()),
-    endedAt: r.endedAt ?? null,
-    status: (r.status as JobRun['status']) ?? 'running',
-    output: r.output ?? '',
-    error: r.error ?? null,
-    exitCode: r.exitCode ?? null,
-    outputPath: r.outputPath ?? null
-  }
-}
-
-async function readTail(path: string): Promise<string> {
-  try {
-    const txt = await fs.readFile(path, 'utf8')
-    if (txt.length <= OUTPUT_TAIL_BYTES) return txt
-    return '… ' + txt.slice(-OUTPUT_TAIL_BYTES)
-  } catch {
-    return ''
+  private async reindex(): Promise<void> {
+    const res = await execCapture(this.aosBin, ['runs', '--json', '--limit', String(this.limit)])
+    if (res.code !== 0) return
+    try {
+      const parsed = JSON.parse(res.stdout) as { runs?: JobRun[] }
+      if (Array.isArray(parsed.runs)) this.cache = parsed.runs
+    } catch {
+      /* malformed output — keep prior cache, the next tick will retry */
+    }
   }
 }

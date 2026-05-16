@@ -87,7 +87,7 @@ async function initService(themeStore: ThemeStore): Promise<ServiceHandle> {
   }
 
   const aosHome = homeRes.home
-  const runs = new RunsStore(join(aosHome, 'runs'))
+  const runs = new RunsStore(aosBin, join(aosHome, 'runs'))
   const misses = new MissesStore(join(aosHome, 'misses'))
 
   service = new AppService({

@@ -38,11 +38,12 @@ export async function resolveAosBin(): Promise<string | null> {
   return null
 }
 
-// Runs `aos home` and returns the resolved path on stdout, or null+reason on
-// failure. The CLI exits 1 with a message on stderr when not initialized.
+// Runs `aos home --json` and returns the resolved path, or an error reason.
+// Every Electron-side CLI call passes --json so we parse a stable shape — the
+// human form is reserved for terminals.
 export async function readAosHome(aosBin: string): Promise<{ home: string } | { error: string }> {
   return new Promise((resolve) => {
-    const cp = spawn(aosBin, ['home'], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const cp = spawn(aosBin, ['home', '--json'], { stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     cp.stdout.on('data', (c: Buffer) => {
@@ -53,9 +54,20 @@ export async function readAosHome(aosBin: string): Promise<{ home: string } | { 
     })
     cp.on('error', (err) => resolve({ error: err.message }))
     cp.on('close', (code) => {
-      const path = stdout.trim()
-      if (code === 0 && path) resolve({ home: path })
-      else resolve({ error: stderr.trim() || `aos home exited ${code}` })
+      if (code !== 0) {
+        resolve({ error: stderr.trim() || `aos home exited ${code}` })
+        return
+      }
+      try {
+        const parsed = JSON.parse(stdout) as { home?: unknown }
+        if (typeof parsed.home === 'string' && parsed.home) {
+          resolve({ home: parsed.home })
+          return
+        }
+        resolve({ error: 'aos home --json: missing "home" field' })
+      } catch (err) {
+        resolve({ error: `aos home --json: ${(err as Error).message}` })
+      }
     })
   })
 }
