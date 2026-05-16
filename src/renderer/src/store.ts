@@ -1,12 +1,11 @@
 import { create } from 'zustand'
-import type { Agent, JobRun, MissedRun, SystemStatus } from '@shared/scheduler'
+import type { Agent, JobRun, SystemStatus } from '@shared/scheduler'
 import type { Theme, ThemeSummary } from '@shared/theme'
 import { applyTheme } from './theme'
 
 type AppState = {
   agents: Agent[]
   runs: JobRun[]
-  missed: MissedRun[]
   status: SystemStatus | null
   theme: Theme | null
   themes: ThemeSummary[]
@@ -20,20 +19,18 @@ type AppState = {
 export const useApp = create<AppState>((set, get) => ({
   agents: [],
   runs: [],
-  missed: [],
   status: null,
   theme: null,
   themes: [],
   loading: true,
 
   refresh: async () => {
-    const [agents, runs, missed, status] = await Promise.all([
+    const [agents, runs, status] = await Promise.all([
       window.api.agents.list(),
       window.api.scheduler.listRuns(),
-      window.api.scheduler.listMissed(),
       window.api.scheduler.status()
     ])
-    set({ agents, runs, missed, status, loading: false })
+    set({ agents, runs, status, loading: false })
   },
 
   // Both the top-bar "rescan" and the SystemBanner "reconcile" route through

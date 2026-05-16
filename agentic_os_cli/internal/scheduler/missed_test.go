@@ -1,0 +1,144 @@
+package scheduler
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+// hourlyAgent returns a scheduled hourly agent at the given minute, with
+// scheduledAt anchoring the cron walk far enough back that DetectMissed will
+// consider recent slots.
+func hourlyAgent(id string, minute int, scheduledAt time.Time) Agent {
+	return Agent{
+		ID: id,
+		Meta: AgentMeta{
+			Schedule:    &ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: minute},
+			ScheduledAt: scheduledAt.UTC().Format(time.RFC3339Nano),
+		},
+	}
+}
+
+func TestDetectMissed_returnsOnlyTheLatestUncoveredSlotPerAgent(t *testing.T) {
+	// An hourly agent that hasn't run for 3 hours. The naive "all slots in
+	// window" algorithm would return three entries; the latest-only contract
+	// requires exactly one — the most recent expected slot.
+	now := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
+	scheduledAt := now.Add(-24 * time.Hour)
+	a := hourlyAgent("ping", 0, scheduledAt)
+
+	out := DetectMissed([]Agent{a}, nil, DetectOpts{Now: now})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 miss, got %d (%+v)", len(out), out)
+	}
+	wantSlot := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	if !out[0].ExpectedAt.Equal(wantSlot) {
+		t.Fatalf("expected slot %v, got %v", wantSlot, out[0].ExpectedAt)
+	}
+}
+
+func TestDetectMissed_handlesWeeklyAcrossMultiDayOutage(t *testing.T) {
+	// Daily-Monday-only at 09:00. Last fire 2 weeks ago, today is Thursday.
+	// The most recent expected slot is "this past Monday at 09:00".
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC) // Thursday
+	scheduledAt := time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC) // Monday, 17 days back
+	a := Agent{
+		ID: "weekly",
+		Meta: AgentMeta{
+			Schedule:    &ScheduleSpec{Kind: "daily", Days: []Weekday{Mon}, Hour: 9, Minute: 0},
+			ScheduledAt: scheduledAt.UTC().Format(time.RFC3339Nano),
+		},
+	}
+	out := DetectMissed([]Agent{a}, nil, DetectOpts{Now: now})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 miss, got %d (%+v)", len(out), out)
+	}
+	// This past Monday relative to Thu 2026-05-14 was 2026-05-11.
+	want := time.Date(2026, 5, 11, 9, 0, 0, 0, time.UTC)
+	if !out[0].ExpectedAt.Equal(want) {
+		t.Fatalf("expected %v got %v", want, out[0].ExpectedAt)
+	}
+}
+
+func TestDetectMissed_coveredSlotProducesNothing(t *testing.T) {
+	now := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
+	scheduledAt := now.Add(-2 * time.Hour)
+	a := hourlyAgent("ping", 0, scheduledAt)
+
+	// Successful run at the 12:00 slot — covers it via rule (a) (within jitter).
+	runs := []JobRun{
+		{
+			ID:            "real-12",
+			JobID:         "ping",
+			StartedAt:     "2026-05-16T12:00:00.500Z",
+			Status:        StatusSuccess,
+			StartedAtTime: time.Date(2026, 5, 16, 12, 0, 0, 500_000_000, time.UTC),
+		},
+	}
+	out := DetectMissed([]Agent{a}, runs, DetectOpts{Now: now})
+	if len(out) != 0 {
+		t.Fatalf("expected 0 misses (slot covered), got %+v", out)
+	}
+}
+
+func TestDetectMissed_recordedMissCoversItsSlot(t *testing.T) {
+	// Steady-state idempotency: once a miss record is on disk, the next tick
+	// at the same slot must not emit. Rule (a) covers regardless of status.
+	now := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
+	scheduledAt := now.Add(-2 * time.Hour)
+	a := hourlyAgent("ping", 0, scheduledAt)
+
+	slot := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	runs := []JobRun{
+		{
+			ID:            MissedRunID("ping", slot),
+			JobID:         "ping",
+			StartedAt:     slot.UTC().Format(time.RFC3339Nano),
+			Status:        StatusMissed,
+			StartedAtTime: slot,
+		},
+	}
+	out := DetectMissed([]Agent{a}, runs, DetectOpts{Now: now})
+	if len(out) != 0 {
+		t.Fatalf("expected 0 misses (previously recorded), got %+v", out)
+	}
+}
+
+func TestDetectMissed_terminalRunAfterSlotCoversIt(t *testing.T) {
+	// Manual catch-up: user runs the agent after a slot was missed. Even
+	// though the run is far outside the ±jitter of the slot, rule (b) covers.
+	now := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
+	scheduledAt := now.Add(-2 * time.Hour)
+	a := hourlyAgent("ping", 0, scheduledAt)
+
+	manualRunAt := time.Date(2026, 5, 16, 12, 20, 0, 0, time.UTC)
+	runs := []JobRun{
+		{
+			ID:            "manual-run",
+			JobID:         "ping",
+			StartedAt:     manualRunAt.UTC().Format(time.RFC3339Nano),
+			Status:        StatusSuccess,
+			StartedAtTime: manualRunAt,
+		},
+	}
+	out := DetectMissed([]Agent{a}, runs, DetectOpts{Now: now})
+	if len(out) != 0 {
+		t.Fatalf("expected 0 misses (manual catch-up covers), got %+v", out)
+	}
+}
+
+func TestMissedRunID_isStableAndPortable(t *testing.T) {
+	exp := time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC)
+	got := MissedRunID("ping", exp)
+	want := "miss-ping-2026-05-15T09-00-00Z"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	if strings.Contains(got, ":") {
+		t.Fatalf("id contains ':', not portable: %q", got)
+	}
+	again := MissedRunID("ping", exp)
+	if again != got {
+		t.Fatalf("non-deterministic: %q vs %q", got, again)
+	}
+}

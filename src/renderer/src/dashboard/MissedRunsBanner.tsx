@@ -1,11 +1,31 @@
-import { useEffect, useState, type JSX } from 'react'
+import { useEffect, useMemo, useState, type JSX } from 'react'
+import type { JobRun } from '@shared/scheduler'
 import { useApp } from '../store'
 import { relativeFromNow } from '../lib/format'
 
 const SHOW = 3
 
+// An agent shows up here iff its most-recent run is status:"missed".
+// That collapses an outage of many slots into one banner row per agent and
+// auto-clears the row the moment a new run (manual or scheduled) lands.
+// See agentic_os_cli/MISSES_AS_RUNS_PLAN.md.
+function selectBehindAgents(runs: JobRun[]): JobRun[] {
+  const latestPerAgent = new Map<string, JobRun>()
+  for (const r of runs) {
+    const cur = latestPerAgent.get(r.jobId)
+    if (!cur || r.startedAt > cur.startedAt) latestPerAgent.set(r.jobId, r)
+  }
+  const out: JobRun[] = []
+  for (const r of latestPerAgent.values()) {
+    if (r.status === 'missed') out.push(r)
+  }
+  out.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+  return out
+}
+
 export function MissedRunsBanner(): JSX.Element | null {
-  const missed = useApp((s) => s.missed)
+  const runs = useApp((s) => s.runs)
+  const behind = useMemo(() => selectBehindAgents(runs), [runs])
   const [launchError, setLaunchError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -14,10 +34,10 @@ export function MissedRunsBanner(): JSX.Element | null {
     return () => clearTimeout(t)
   }, [launchError])
 
-  if (missed.length === 0) return null
+  if (behind.length === 0) return null
 
-  const top = missed.slice(0, SHOW)
-  const remaining = missed.length - top.length
+  const top = behind.slice(0, SHOW)
+  const remaining = behind.length - top.length
 
   const runNow = async (jobId: string): Promise<void> => {
     setLaunchError(null)
@@ -45,31 +65,25 @@ export function MissedRunsBanner(): JSX.Element | null {
           className="font-display text-[11px] uppercase text-[var(--color-fg-dim)] tabular"
           style={{ letterSpacing: '0.22em' }}
         >
-          {missed.length.toString().padStart(2, '0')}
-        </span>
-        <span
-          className="ml-auto font-display text-[10px] uppercase text-[var(--color-fg-faint)]"
-          style={{ letterSpacing: '0.22em' }}
-        >
-          last 24h
+          {behind.length.toString().padStart(2, '0')}
         </span>
       </div>
       <ul className="mt-2 flex flex-col divide-y divide-[var(--color-rule)] text-[11px]">
-        {top.map((m) => (
-          <li key={`${m.agentId}|${m.expectedAt}`} className="flex items-center gap-3 py-1.5">
+        {top.map((r) => (
+          <li key={r.id} className="flex items-center gap-3 py-1.5">
             <span
               className="font-display text-[12px] font-bold uppercase text-[var(--color-fg)]"
               style={{ letterSpacing: '0.16em' }}
             >
-              {m.agentId}
+              {r.jobId}
             </span>
             <span className="text-[var(--color-fg-dim)] tabular">
-              expected {relativeFromNow(m.expectedAt)}
+              expected {relativeFromNow(r.startedAt)}
             </span>
             <button
               type="button"
               onClick={() => {
-                void runNow(m.agentId)
+                void runNow(r.jobId)
               }}
               className="ml-auto border border-[var(--color-hot)] px-2 py-0.5 font-display text-[10px] font-bold uppercase text-[var(--color-hot)] transition-colors hover:bg-[var(--color-hot)] hover:text-[var(--color-bg)]"
               style={{ letterSpacing: '0.22em' }}

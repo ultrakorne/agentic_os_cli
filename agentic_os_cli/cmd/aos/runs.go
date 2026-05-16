@@ -140,9 +140,13 @@ func printOneRunHuman(r scheduler.JobRun) error {
 }
 
 // elapsedString returns "..." while the run is still in flight (no endedAt)
-// and a ms-precision duration once the wrapper has recorded the end. Falls
-// back to "-" if either timestamp won't parse — better than a panic.
+// and a ms-precision duration once the wrapper has recorded the end. Missed
+// runs never ran, so they render as an em-dash. Falls back to "-" if either
+// timestamp won't parse — better than a panic.
 func elapsedString(r scheduler.JobRun) string {
+	if r.Status == scheduler.StatusMissed {
+		return "—"
+	}
 	if r.EndedAt == nil || *r.EndedAt == "" {
 		return "..."
 	}
@@ -155,6 +159,9 @@ func elapsedString(r scheduler.JobRun) string {
 }
 
 func exitString(r scheduler.JobRun) string {
+	if r.Status == scheduler.StatusMissed {
+		return "—"
+	}
 	if r.ExitCode == nil {
 		return "-"
 	}

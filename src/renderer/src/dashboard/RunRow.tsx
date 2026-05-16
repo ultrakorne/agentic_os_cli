@@ -23,7 +23,61 @@ export function RunRow({
   onViewFull
 }: Props): JSX.Element {
   const live = run.status === 'running'
+  const isMissed = run.status === 'missed'
   const duration = formatDuration(run)
+
+  // Missed rows aren't interactive: there's no .out file to expand, no error
+  // body, and the timestamp shown is the expected slot, not when the wrapper
+  // ran (because it didn't). Render with a dashed border so they read as a
+  // gap in the timeline rather than a normal entry.
+  if (isMissed) {
+    return (
+      <div
+        aria-label="missed scheduled run"
+        className="border border-dashed border-[var(--color-rule-bright)] bg-[var(--color-surface)]"
+      >
+        <div className="grid w-full grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-3 px-3 py-2">
+          <StatusGlyph status={run.status} />
+          <span className="flex min-w-0 flex-col">
+            <span
+              className="font-display text-[11px] font-bold uppercase text-[var(--color-fg-dim)] tabular"
+              style={{ letterSpacing: '0.14em' }}
+            >
+              {formatClock(run.startedAt)}
+            </span>
+            <span className="text-[10px] text-[var(--color-fg-faint)] tabular">
+              expected {relativeFromNow(run.startedAt)}
+            </span>
+          </span>
+          <span
+            className="inline-block border px-1.5 py-0.5 font-display text-[9px] uppercase"
+            style={{
+              letterSpacing: '0.22em',
+              color: 'var(--color-hot)',
+              borderColor: 'var(--color-hot)'
+            }}
+          >
+            missed
+          </span>
+          <span
+            className="font-display text-[10px] uppercase text-[var(--color-fg-faint)] tabular min-w-[3.5em] text-right"
+            style={{ letterSpacing: '0.18em' }}
+          >
+            —
+          </span>
+          <span
+            className="font-display text-[10px] uppercase text-[var(--color-fg-faint)] tabular min-w-[2em] text-right"
+            style={{ letterSpacing: '0.18em' }}
+          >
+            —
+          </span>
+          <span aria-hidden className="text-transparent select-none">
+            ▸
+          </span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="border border-[var(--color-rule)] bg-[var(--color-surface)]">
@@ -178,6 +232,16 @@ function StatusGlyph({ status }: { status: JobRun['status'] }): JSX.Element {
         className="inline-flex size-4 items-center justify-center text-base text-[var(--color-danger)] neon-text-soft"
       >
         ▲
+      </span>
+    )
+  }
+  if (status === 'missed') {
+    return (
+      <span
+        aria-label="missed scheduled run"
+        className="inline-flex size-4 items-center justify-center text-base text-[var(--color-hot)] neon-text-soft"
+      >
+        ▽
       </span>
     )
   }

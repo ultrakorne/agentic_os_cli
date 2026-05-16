@@ -31,6 +31,11 @@ var tickCmd = &cobra.Command{
 // line in tick.log keeps its historical "[tick] ..." shape (existing log
 // readers depend on the prefix), but stdout switches between this struct and
 // a styled block depending on --json.
+//
+// Missed counts miss records *newly written this tick*, not currently
+// outstanding — see MISSES_AS_RUNS_PLAN.md. Most ticks emit 0; the count
+// goes positive only when a new uncovered slot is detected for an agent
+// that didn't already have a record for it.
 type TickSummary struct {
 	Timestamp string `json:"timestamp"`
 	Scripts   int    `json:"scripts"`
@@ -61,11 +66,11 @@ func runTick() error {
 	}
 
 	now := time.Now()
-	missed, missesErr := scheduler.SyncMissesDir(cfg.AosHome, scan.Agents, now)
+	missed, missesErr := scheduler.RecordMissedRuns(cfg.AosHome, scan.Agents, now)
 	if missesErr != nil {
 		// Don't fail the tick — the runs/cron side of the world is still
-		// authoritative even if the dashboard's misses view is briefly stale.
-		fmt.Fprintf(os.Stderr, "[tick] sync misses: %v\n", missesErr)
+		// authoritative even if a miss record didn't land this round.
+		fmt.Fprintf(os.Stderr, "[tick] record missed runs: %v\n", missesErr)
 	}
 
 	state := crontabState(cfg.AosHome, scan.Agents)

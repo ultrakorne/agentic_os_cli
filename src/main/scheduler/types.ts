@@ -4,7 +4,6 @@ export type {
   JobRun,
   JobRunStatus,
   JobRunTrigger,
-  MissedRun,
   RefreshSummary,
   ScheduleSpec,
   SystemStatus,

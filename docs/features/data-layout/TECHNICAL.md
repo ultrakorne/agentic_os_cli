@@ -106,7 +106,7 @@ IDs must be unique across the whole tree; duplicates are dropped (top-level wins
 ## Noteworthy Behavior
 
 - **Per-run files, not jsonl appends.** Each run creates two files (`<id>.json` + `<id>.out`). Atomic via temp + rename for the meta; raw redirection for the output.
-- **fs.watch on `runs/`** is debounced 250ms; the 5-minute missed-run sweep doubles as a safety net for any watch events the OS drops.
+- **fs.watch on `runs/`** is debounced 250ms. The CLI's 10-minute `aos tick` (cron-driven) doubles as a safety net for any watch events the OS drops, since each tick writes/replaces the per-agent miss record where applicable.
 - **GC at engine start, not continuous.** If `runs/` exceeds 2000 runs, the oldest by mtime are deleted down to that cap. Files are grouped by stem so `<id>.json` and `<id>.out` always age out together — never an orphan on either side.
 - **In-memory cache is 500 newest runs.** Plus a tail summary per run (~4KB).
 - **Atomic-rename for the JSON files.** `writeJson` writes `path.tmp` then `rename`s. Sidecar writes that produce an empty meta `unlink` the file instead, so the directory listing stays minimal.

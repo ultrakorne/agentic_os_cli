@@ -7,20 +7,13 @@ import { glowFrame } from './styles'
 type Props = {
   agent: Agent
   recentRun: JobRun | undefined
-  missedCount: number
   selected: boolean
   onSelect: () => void
 }
 
 type Status = JobRun['status'] | undefined
 
-export function AgentCard({
-  agent,
-  recentRun,
-  missedCount,
-  selected,
-  onSelect
-}: Props): JSX.Element {
+export function AgentCard({ agent, recentRun, selected, onSelect }: Props): JSX.Element {
   const schedule = agent.schedule
   const [pendingSince, setPendingSince] = useState<number | null>(null)
   const [launchError, setLaunchError] = useState<string | null>(null)
@@ -82,7 +75,12 @@ export function AgentCard({
 
       {/* header: status + id + run */}
       <div className="relative flex items-start gap-2.5">
-        <StatusGlyph status={status} scheduled={!!schedule} live={live} missed={missedCount > 0} />
+        <StatusGlyph
+          status={status}
+          scheduled={!!schedule}
+          live={live}
+          missed={status === 'missed'}
+        />
         <span className="min-w-0 flex-1">
           <span
             className={`font-display block truncate text-[13px] font-bold uppercase ${
@@ -140,6 +138,7 @@ export function AgentCard({
 function pickGlow(status: Status, scheduled: boolean, selected: boolean, live: boolean): string {
   if (selected) return '--color-hot'
   if (live) return '--color-cool'
+  if (status === 'missed') return '--color-hot'
   if (status === 'error') return '--color-danger'
   if (status === 'success') return '--color-success'
   if (scheduled) return '--color-cool'

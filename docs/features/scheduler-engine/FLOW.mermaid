@@ -17,7 +17,8 @@ stateDiagram-v2
     end note
 
     note left of Idle
-        Missed-run sweep every 5 min:
-        expected ticks - actual runs
-        → MissedRun[] (no auto-fire)
+        aos tick (cron, every 10 min):
+        latest uncovered expected slot
+        → JobRun{status:"missed"} in runs/
+        (one per agent, no auto-fire)
     end note

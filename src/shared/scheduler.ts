@@ -12,7 +12,11 @@ export type AgentMeta = {
 }
 
 export type JobRunTrigger = 'schedule' | 'manual' | 'catch-up'
-export type JobRunStatus = 'running' | 'success' | 'error'
+// 'missed' is written by `aos tick` / `aos refresh` when a scheduled slot
+// fires while the wrapper isn't running. startedAt holds the expected slot;
+// endedAt, exitCode, outputPath, error are all null. Only one missed record
+// per agent exists at a time — see agentic_os_cli/MISSES_AS_RUNS_PLAN.md.
+export type JobRunStatus = 'running' | 'success' | 'error' | 'missed'
 
 export type JobRun = {
   id: string
@@ -41,11 +45,6 @@ export type Agent = {
   // Empty when the script is fine to run. The dashboard renders these on the
   // card and the cron block omits warned agents on the next refresh.
   warnings: string[]
-}
-
-export type MissedRun = {
-  agentId: string
-  expectedAt: string
 }
 
 // One-line summary of an `aos refresh` invocation, with each key=value field

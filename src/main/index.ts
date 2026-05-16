@@ -4,7 +4,6 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { AppService } from './service'
 import { RunsStore } from './scheduler/runs-store'
-import { MissesStore } from './scheduler/misses-store'
 import { broadcastChange, registerIpc, type ServiceHandle } from './ipc'
 import { createThemeStore, type ThemeStore } from './theme/loader'
 import { resolveAosBin, readAosHome } from './cli'
@@ -88,13 +87,11 @@ async function initService(themeStore: ThemeStore): Promise<ServiceHandle> {
 
   const aosHome = homeRes.home
   const runs = new RunsStore(aosBin, join(aosHome, 'runs'))
-  const misses = new MissesStore(join(aosHome, 'misses'))
 
   service = new AppService({
     aosBin,
     aosHome,
     runs,
-    misses,
     onChange: () => broadcastChange()
   })
   await service.start()

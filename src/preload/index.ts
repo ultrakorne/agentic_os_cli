@@ -1,13 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type {
-  Agent,
-  JobRun,
-  MissedRun,
-  RefreshSummary,
-  ScheduleSpec,
-  SystemStatus
-} from '../shared/scheduler'
+import type { Agent, JobRun, RefreshSummary, ScheduleSpec, SystemStatus } from '../shared/scheduler'
 import type { Theme, ThemeSummary } from '../shared/theme'
 
 const C = {
@@ -16,7 +9,6 @@ const C = {
   agentsSetSchedule: 'agents:set-schedule',
   agentsSetDescription: 'agents:set-description',
   schedListRuns: 'scheduler:list-runs',
-  schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
   schedRunNow: 'scheduler:run-now',
   schedRefresh: 'scheduler:refresh',
@@ -39,7 +31,6 @@ const api = {
   },
   scheduler: {
     listRuns: (jobId?: string): Promise<JobRun[]> => ipcRenderer.invoke(C.schedListRuns, jobId),
-    listMissed: (): Promise<MissedRun[]> => ipcRenderer.invoke(C.schedListMissed),
     readOutput: (runId: string): Promise<string | null> =>
       ipcRenderer.invoke(C.schedReadOutput, runId),
     runNow: (agentId: string): Promise<JobRun> => ipcRenderer.invoke(C.schedRunNow, agentId),

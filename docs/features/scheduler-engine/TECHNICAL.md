@@ -2,22 +2,17 @@
 
 ## Architecture
 
-System cron is the ticker; the [`aos` CLI](../../../agentic_os_cli/) owns everything that touches the user's system (the agents tree, sidecar writes, the managed crontab block, the misses dir, `wrapper.sh`); the Electron main process is a view that caches what the CLI emits and shells out for every mutation.
+System cron is the ticker; the [`aos` CLI](../../../agentic_os_cli/) owns everything that touches the user's system (the agents tree, sidecar writes, the managed crontab block, the runs directory — including missed-slot records — and `wrapper.sh`); the Electron main process is a view that caches what the CLI emits and shells out for every mutation.
 
-On `AppService.start()` the main process (1) loads the runs and misses watchers, (2) shells out to `aos list --json` to populate the agent cache, (3) starts watchers on `runs/` and `misses/`, then (4) fires `aos refresh --json` once to reconcile cron on boot. Schedule and description edits go through `aos schedule` / `aos describe`, both of which write the meta sidecar **and** reconcile cron in-process before printing the result. Manual "run now" shells out to `aos run <id> --json`, which spawns `wrapper.sh` detached and prints the `JobRun` stub.
+On `AppService.start()` the main process (1) loads the runs watcher, (2) shells out to `aos list --json` to populate the agent cache, (3) starts the watcher on `runs/`, then (4) fires `aos refresh --json` once to reconcile cron on boot. Schedule and description edits go through `aos schedule` / `aos describe`, both of which write the meta sidecar **and** reconcile cron in-process before printing the result. Manual "run now" shells out to `aos run <id> --json`, which spawns `wrapper.sh` detached and prints the `JobRun` stub.
 
 ## Source Files
 
 | File | Role |
 |------|------|
-| `src/shared/scheduler.ts` | Public types shared across main/preload/renderer (`Agent`, `AgentMeta`, `JobRun`, `MissedRun`, `ScheduleSpec`, `RefreshSummary`) |
+| `src/shared/scheduler.ts` | Public types shared across main/preload/renderer (`Agent`, `AgentMeta`, `JobRun`, `JobRunStatus`, `ScheduleSpec`, `RefreshSummary`). `JobRunStatus` includes `'missed'` — missed scheduled slots are persisted as `JobRun` records by the CLI rather than tracked in a separate store |
 | `src/main/scheduler/types.ts` | Re-exports shared types for the main-process import path |
-| `src/main/scheduler/spec.ts` | `compileToCron` — fed to croner for per-card `nextRun` computation only; the CLI is the source of truth for cron compilation |
-| `src/main/scheduler/spec.test.ts` | Spec compilation + previous-tick math tests |
-| `src/main/scheduler/missed.ts` | Walk-forward expected-tick enumeration via croner's `nextRun`; tolerance match against actual runs |
-| `src/main/scheduler/missed.test.ts` | Pure-function tests for missed-run detection |
-| `src/main/scheduler/runs-store.ts` | Reader for `runs/<id>.{json,out}`; fs.watch + debounce; lazy output read |
-| `src/main/scheduler/misses-store.ts` | Reader for `<aos_home>/misses/`; fs.watch + debounce |
+| `src/main/scheduler/runs-store.ts` | Reader for `runs/<id>.{json,out}`; fs.watch + debounce; lazy output read. Missed slots arrive here as `JobRun{status:"missed"}` entries written by `aos tick` / `aos refresh` (see `agentic_os_cli/MISSES_AS_RUNS_PLAN.md`) |
 | `src/main/agents/agent-list.ts` | Parses `aos list --json` into the renderer's `Agent[]`; converts `ScheduleSpec` back into CLI flag form for `aos schedule` |
 | `src/main/agents/agent-list.test.ts` | Round-trip tests for the parser and the schedule-to-flags converter |
 | `src/main/service.ts` | `AppService`: in-memory agent cache, shells out to `aos list/schedule/describe/refresh/run` for every mutation (including manual runs) |
@@ -64,10 +59,9 @@ Each cron line carries a trailing `# agentic_os:<agentId>` tag. The tag lets the
 
 ## Noteworthy Behavior
 
-- **`previousRun()` is not used.** croner's `previousRun()` only returns a value if the cron has actually fired in-process — it doesn't compute "what would the prior tick be". `missed.detectMissed` walks forward via `cron.nextRun(cursor)` from `now - windowMs` to `now`, which is reliable.
-- **Tolerance is 90s.** Generous to cover cron jitter, machine wake-up lag, and clock skew. A schedule for `:00` matches a run at `:00:30` or `:00:00.500`.
-- **A later run clears prior missed slots.** `detectMissed` flags an expected tick T as missed only if the agent's most recent run started before `T - tolerance`. A manual run from the UI (or a catch-up scheduled run) implicitly acknowledges all prior gaps for that agent — the banner clears without waiting for the next on-time tick.
-- **Missed-run sweep runs even when no UI is open.** A setInterval on the engine, fires every 5 minutes, broadcasts only when the missed set changes. The runs-directory watcher also triggers a sweep on every change so manual-run completions clear the banner immediately.
+- **Missed-slot detection lives in the CLI, not the renderer.** `aos tick` (invoked by cron every 10 minutes) and `aos refresh` walk each agent's cron expression forward to find the most-recent uncovered expected slot ≤ now, and persist it as a `JobRun{status:"missed"}` into `<aos_home>/runs/`. The renderer never recomputes — it reads the runs directory.
+- **Only the latest miss per agent is recorded.** When a newer uncovered slot is detected, the previous miss file for that agent is deleted and replaced; at most one `miss-*` record per agent exists on disk at any time. See `agentic_os_cli/MISSES_AS_RUNS_PLAN.md` for the rationale.
+- **A later run clears the "behind" banner.** The dashboard derives its missed-runs banner by taking the latest run per agent and filtering to `status === 'missed'`. A successful manual or scheduled run becomes the new latest for that agent and the banner clears immediately; the historical miss record stays in the run history.
 - **fs.watch is debounced 250ms.** When the wrapper writes the running meta and then the final meta, both events would otherwise re-broadcast. The 5-minute sweep also re-indexes the dir as a safety net.
 - **Output is read lazily.** `RunsStore.list()` returns each run with a tail summary (last 4KB) populated at ingest time; full output is only loaded on `scheduler:read-run-output(runId)`.
 - **Runs dir GC at engine start.** Files are grouped by run-id stem so `<id>.json` + `<id>.out` are always deleted as a pair, never leaving an orphan on either side.
@@ -88,7 +82,6 @@ Each cron line carries a trailing `# agentic_os:<agentId>` tag. The tag lets the
 
 ## Dependencies
 
-- `croner` — used for `compileToCron` source and `nextRun()` in `missed.detectMissed` and `engine.nextRunFor`
 - `child_process` (Node) — spawning the `aos` CLI for every read and mutation (`list`, `schedule`, `describe`, `refresh`, `run`)
 - `fs.watch` (Node) — runs directory observer
 - `python3` (system) — required at runtime to JSON-encode wrapper meta files

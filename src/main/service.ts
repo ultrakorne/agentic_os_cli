@@ -1,21 +1,12 @@
-import type {
-  Agent,
-  JobRun,
-  MissedRun,
-  RefreshSummary,
-  ScheduleSpec,
-  SystemStatus
-} from '../shared/scheduler'
+import type { Agent, JobRun, RefreshSummary, ScheduleSpec, SystemStatus } from '../shared/scheduler'
 import { execCapture } from './exec'
 import { RunsStore } from './scheduler/runs-store'
-import { MissesStore } from './scheduler/misses-store'
 import { parseAgentList, scheduleToArgs } from './agents/agent-list'
 
 export type AppServiceOpts = {
   aosBin: string
   aosHome: string
   runs: RunsStore
-  misses: MissesStore
   onChange?: () => void
 }
 
@@ -23,7 +14,8 @@ export type AppServiceOpts = {
 // agents list (re-fetched from `aos list --json` whenever something
 // changes) and proxies every sidecar write through the `aos` CLI. This is
 // the "view" half of the system; the CLI owns the agents tree, the meta
-// sidecars, the managed crontab block, and the misses dir.
+// sidecars, the managed crontab block, and the runs directory (including
+// `miss-*` records — see MISSES_AS_RUNS_PLAN.md).
 export class AppService {
   private agents: Agent[] = []
   private lastRefresh: RefreshSummary | null = null
@@ -36,19 +28,15 @@ export class AppService {
   }
 
   async start(): Promise<void> {
-    await Promise.all([this.opts.runs.load(), this.opts.misses.load()])
+    await this.opts.runs.load()
     await this.refreshAgents()
     this.opts.runs.startWatching(() => {
-      this.opts.onChange?.()
-    })
-    this.opts.misses.startWatching(() => {
       this.opts.onChange?.()
     })
   }
 
   stop(): void {
     this.opts.runs.stopWatching()
-    this.opts.misses.stopWatching()
   }
 
   // Re-fetch agents from the CLI. The CLI scanner is the single source of
@@ -69,10 +57,6 @@ export class AppService {
 
   listAgents(): Agent[] {
     return this.agents.map((a) => ({ ...a, warnings: [...a.warnings] }))
-  }
-
-  listMissed(): MissedRun[] {
-    return this.opts.misses.list()
   }
 
   listRuns(jobId?: string): JobRun[] {

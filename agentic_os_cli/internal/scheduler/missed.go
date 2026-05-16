@@ -7,6 +7,7 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// MissedRun is one uncovered scheduled slot for one agent.
 type MissedRun struct {
 	AgentID    string
 	ExpectedAt time.Time
@@ -14,32 +15,39 @@ type MissedRun struct {
 
 type DetectOpts struct {
 	Now      time.Time
-	Window   time.Duration
 	Jitter   time.Duration
 	MaxTicks int
 }
 
 const (
-	DefaultWindow   = 24 * time.Hour
 	DefaultJitter   = 30 * time.Second
 	DefaultMaxTicks = 500
+	// lookbackBound caps how far back DetectMissed walks the cron schedule.
+	// The longest period any ScheduleSpec can produce is once-per-week
+	// (daily with a single weekday), so 8 days is enough to find the latest
+	// expected slot for any schedule we support.
+	lookbackBound = 8 * 24 * time.Hour
 )
 
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 
-// DetectMissed flags expected fire times in [now-window, now] for which no
-// wrapper run was recorded. The wrapper writes status="running" before
-// `exec`, so any run within ±jitter of an expected slot covers it, regardless
-// of final status. Terminal runs at or after a slot also cover it (manual
-// catch-up). A running record at-or-after E-jitter covers E (in-flight).
+// DetectMissed returns at most one MissedRun per agent: the most-recent
+// expected slot <= now that no run covers. By design we don't surface every
+// missed slot in a multi-slot outage — see MISSES_AS_RUNS_PLAN.md "only the
+// latest miss per agent is recorded" for the rationale.
+//
+// Coverage rules (isCovered):
+//
+//	(a) any run within ±jitter of the slot — regardless of status, so a
+//	    previously-recorded miss record at this slot acts as an ack and
+//	    prevents re-emission on the next tick.
+//	(b) any terminal run (success|error) at-or-after the slot — manual
+//	    catch-up or a later scheduled fire.
+//	(c) any running record at-or-after slot - jitter — wrapper in flight.
 func DetectMissed(agents []Agent, runs []JobRun, opts DetectOpts) []MissedRun {
 	now := opts.Now
 	if now.IsZero() {
 		now = time.Now()
-	}
-	window := opts.Window
-	if window == 0 {
-		window = DefaultWindow
 	}
 	jitter := opts.Jitter
 	if jitter == 0 {
@@ -49,7 +57,7 @@ func DetectMissed(agents []Agent, runs []JobRun, opts DetectOpts) []MissedRun {
 	if maxTicks == 0 {
 		maxTicks = DefaultMaxTicks
 	}
-	cutoff := now.Add(-window)
+	lookbackFloor := now.Add(-lookbackBound)
 
 	var out []MissedRun
 	for _, a := range agents {
@@ -65,7 +73,7 @@ func DetectMissed(agents []Agent, runs []JobRun, opts DetectOpts) []MissedRun {
 			continue
 		}
 
-		earliest := cutoff
+		earliest := lookbackFloor
 		if a.Meta.ScheduledAt != "" {
 			if t, err := time.Parse(time.RFC3339Nano, a.Meta.ScheduledAt); err == nil {
 				if t.After(earliest) {
@@ -74,32 +82,31 @@ func DetectMissed(agents []Agent, runs []JobRun, opts DetectOpts) []MissedRun {
 			}
 		}
 
-		var expected []time.Time
+		// Walk forward and keep only the last slot <= now. cron/v3 has no
+		// Prev(), so we step through Next() and overwrite. The lookback
+		// floor + maxTicks bound the loop tightly.
+		var latest time.Time
 		cursor := earliest.Add(-time.Second)
 		for i := 0; i < maxTicks; i++ {
 			next := sched.Next(cursor)
 			if next.IsZero() || next.After(now) {
 				break
 			}
-			expected = append(expected, next)
+			latest = next
 			cursor = next
 		}
-		if len(expected) == 0 {
+		if latest.IsZero() {
 			continue
 		}
 
 		agentRuns := filterRuns(runs, a.ID)
-		sort.Slice(agentRuns, func(i, j int) bool {
-			return agentRuns[i].StartedAtTime.Before(agentRuns[j].StartedAtTime)
-		})
-
-		for _, E := range expected {
-			if isCovered(E, agentRuns, jitter) {
-				continue
-			}
-			out = append(out, MissedRun{AgentID: a.ID, ExpectedAt: E})
+		if isCovered(latest, agentRuns, jitter) {
+			continue
 		}
+		out = append(out, MissedRun{AgentID: a.ID, ExpectedAt: latest})
 	}
+	// Newest first so callers showing a "latest miss" view don't re-sort.
+	// There's only one entry per agent so this just orders agents.
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ExpectedAt.After(out[j].ExpectedAt)
 	})
@@ -121,11 +128,13 @@ func isCovered(E time.Time, runs []JobRun, jitter time.Duration) bool {
 	latest := E.Add(jitter)
 	for _, r := range runs {
 		t := r.StartedAtTime
-		// (a) run matches this slot within ±jitter — covers regardless of status.
+		// (a) run matches this slot within ±jitter — covers regardless of
+		// status. A previously-recorded miss record at this slot lands here,
+		// so detect+record is idempotent across consecutive ticks.
 		if !t.Before(earliest) && !t.After(latest) {
 			return true
 		}
-		// (b) terminal run at-or-after the slot — manual catch-up.
+		// (b) terminal run at-or-after the slot — manual catch-up or later fire.
 		if (r.Status == StatusSuccess || r.Status == StatusError) && !t.Before(E) {
 			return true
 		}

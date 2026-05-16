@@ -47,8 +47,7 @@ In-process glue that owns no scheduling of its own. Responsibilities:
 - Install/refresh the wrapper on every start.
 - Scan the agents directory tree (top level + first-level subdirs) for scripts, folding each script's `<id>.meta.json` sidecar into a unified `AgentEntry`.
 - Reconcile the managed crontab section whenever schedules change.
-- Watch the runs directory and broadcast changes to renderer windows.
-- Sweep for missed runs every five minutes.
+- Watch the runs directory and broadcast changes to renderer windows. Missed scheduled slots show up here as `JobRun{status:"missed"}` records written by `aos tick` / `aos refresh` — there is no separate missed-runs sweep on the renderer side.
 - Spawn the wrapper directly for manual "run now" actions, with `AGENTIC_OS_TRIGGER=manual` in the env.
 
 ## User Flows
@@ -63,7 +62,11 @@ Owner clicks `[run]`. The engine spawns the wrapper as a detached process with t
 
 ### Missed runs
 
-Every five minutes (and once at startup) the engine enumerates the expected ticks for each agent across the last 24 hours, cross-references them with actual runs (90s tolerance for cron jitter / wake lag), and produces a `MissedRun[]` set. The dashboard shows the top three with a per-row "run now" button. There is no auto-fire — cron is the source of truth and the user decides whether a missed run is still relevant.
+`aos tick` (cron-driven, every 10 minutes) and `aos refresh` (boot + on every schedule edit) detect the most-recent expected scheduled slot ≤ now for each agent and, if no real run covers it (±jitter), persist it as a `JobRun{status:"missed"}` record into `<aos_home>/runs/`. Only one such record exists per agent at any time: when a newer uncovered slot is detected, the previous record is replaced.
+
+The dashboard reads the runs directory like any other timeline. The banner derives from "the latest run per agent has `status === 'missed'`", so it shows one row per behind-schedule agent and clears the moment a real run lands (manual or scheduled). The previous miss record stays in the agent's run history as a record of the outage. No auto-fire — cron is the source of truth and the user decides whether the slot is still worth re-running.
+
+See `agentic_os_cli/MISSES_AS_RUNS_PLAN.md` for why only the latest miss is kept on disk (we trade granularity in long outages for a one-row-per-agent banner that auto-resolves).
 
 ### Reconcile a tampered crontab
 

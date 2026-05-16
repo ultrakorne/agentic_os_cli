@@ -7,7 +7,7 @@ import { SystemBanner } from './SystemBanner'
 import { MissedRunsBanner } from './MissedRunsBanner'
 
 export function Dashboard(): JSX.Element {
-  const { agents, runs, missed, loading, status } = useApp()
+  const { agents, runs, loading, status } = useApp()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const cliMissing = status?.cliMissing === true
 
@@ -31,12 +31,6 @@ export function Dashboard(): JSX.Element {
     }
     return m
   }, [runs])
-
-  const missedByAgent = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const x of missed) m.set(x.agentId, (m.get(x.agentId) ?? 0) + 1)
-    return m
-  }, [missed])
 
   const selectedAgent = useMemo(
     () => agents.find((a) => a.id === selectedId) ?? null,
@@ -75,7 +69,6 @@ export function Dashboard(): JSX.Element {
                       key={agent.id}
                       agent={agent}
                       recentRun={lastRunByJob.get(agent.id)}
-                      missedCount={missedByAgent.get(agent.id) ?? 0}
                       selected={selectedId === agent.id}
                       onSelect={() => setSelectedId((cur) => (cur === agent.id ? null : agent.id))}
                     />

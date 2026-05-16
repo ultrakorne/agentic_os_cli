@@ -11,7 +11,6 @@ export const IPC = {
   agentsSetSchedule: 'agents:set-schedule',
   agentsSetDescription: 'agents:set-description',
   schedListRuns: 'scheduler:list-runs',
-  schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
   schedRunNow: 'scheduler:run-now',
   schedRefresh: 'scheduler:refresh',
@@ -53,7 +52,6 @@ export function registerIpc(handle: ServiceHandle): void {
   })
 
   ipcMain.handle(IPC.schedListRuns, (_e, jobId?: string) => service?.listRuns(jobId) ?? [])
-  ipcMain.handle(IPC.schedListMissed, () => service?.listMissed() ?? [])
   ipcMain.handle(IPC.schedReadOutput, (_e, runId: string) => service?.readOutput(runId) ?? null)
   ipcMain.handle(IPC.schedRunNow, (_e, agentId: string) => {
     if (!service) throw new Error(NO_CLI)
