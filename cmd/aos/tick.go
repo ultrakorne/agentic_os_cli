@@ -33,9 +33,9 @@ var tickCmd = &cobra.Command{
 // a styled block depending on --json.
 //
 // Missed counts miss records *newly written this tick*, not currently
-// outstanding — see MISSES_AS_RUNS_PLAN.md. Most ticks emit 0; the count
-// goes positive only when a new uncovered slot is detected for an agent
-// that didn't already have a record for it.
+// outstanding. Most ticks emit 0; the count goes positive only when a new
+// uncovered slot is detected for an agent that didn't already have a record
+// for it.
 type TickSummary struct {
 	Timestamp string `json:"timestamp"`
 	Scripts   int    `json:"scripts"`

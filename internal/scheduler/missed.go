@@ -33,8 +33,10 @@ var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month 
 
 // DetectMissed returns at most one MissedRun per agent: the most-recent
 // expected slot <= now that no run covers. By design we don't surface every
-// missed slot in a multi-slot outage — see MISSES_AS_RUNS_PLAN.md "only the
-// latest miss per agent is recorded" for the rationale.
+// missed slot in a multi-slot outage — once the latest is recorded as a
+// JobRun{status:"missed"} on disk, rule (a) below covers it on subsequent
+// ticks. Replacement (one miss file per agent at a time) happens in
+// RecordMissedRuns.
 //
 // Coverage rules (isCovered):
 //
