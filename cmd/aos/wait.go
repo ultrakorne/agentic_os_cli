@@ -108,6 +108,17 @@ type waitModel struct {
 }
 
 func newWaitModel(ctx context.Context, runsDir, runID, agentID string, startedAt time.Time, estimate time.Duration) waitModel {
+	// Progress bar fills with the "running" status color (ANSI yellow) because
+	// it *is* a running indicator — same hue the status field uses elsewhere,
+	// so the bar and the word "running" read as one signal. The empty track
+	// uses the muted ANSI slot. ANSI 0-15 means the terminal theme decides the
+	// actual hues, not the bubbles default purple→pink. The spinner has no
+	// Style set, so it renders in the default terminal foreground.
+	bar := progress.New(
+		progress.WithColors(colorRunning),
+		progress.WithoutPercentage(),
+	)
+	bar.EmptyColor = colorMuted
 	return waitModel{
 		ctx:       ctx,
 		runsDir:   runsDir,
@@ -116,7 +127,7 @@ func newWaitModel(ctx context.Context, runsDir, runID, agentID string, startedAt
 		startedAt: startedAt,
 		estimate:  estimate,
 		sp:        spinner.New(spinner.WithSpinner(spinner.Dot)),
-		bar:       progress.New(progress.WithDefaultBlend(), progress.WithoutPercentage()),
+		bar:       bar,
 	}
 }
 
@@ -125,10 +136,17 @@ func (m waitModel) Init() tea.Cmd {
 		tea.Tick(100*time.Millisecond, func(t time.Time) tea.Msg { return waitTickMsg(t) }),
 		m.waitCmd(),
 	}
-	if m.estimate < 0 {
+	if useSpinner(m.estimate) {
 		cmds = append(cmds, m.sp.Tick)
 	}
 	return tea.Batch(cmds...)
+}
+
+// useSpinner picks the indeterminate spinner for runs we can't draw a useful
+// bar for: no estimate (< 0), or an estimate under 1s where the bar would
+// effectively snap from empty to full and look glitchy.
+func useSpinner(estimate time.Duration) bool {
+	return estimate < time.Second
 }
 
 // waitCmd runs the blocking poll in a goroutine. The goroutine respects ctx;
@@ -178,9 +196,8 @@ func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m waitModel) View() tea.View {
 	elapsed := time.Since(m.startedAt).Truncate(time.Millisecond)
-	if m.estimate < 0 {
-		return tea.NewView(fmt.Sprintf("%s waiting on %s — %s elapsed (no estimate)\n",
-			m.sp.View(), m.agentID, elapsed))
+	if useSpinner(m.estimate) {
+		return tea.NewView(fmt.Sprintf("%s %s\n", m.sp.View(), elapsed))
 	}
 	pct := float64(elapsed) / float64(m.estimate)
 	if pct > 0.99 {
@@ -189,6 +206,5 @@ func (m waitModel) View() tea.View {
 	if pct < 0 {
 		pct = 0
 	}
-	return tea.NewView(fmt.Sprintf("%s  %s — %s / ~%s\n",
-		m.bar.ViewAs(pct), m.agentID, elapsed, m.estimate.Truncate(time.Millisecond)))
+	return tea.NewView(fmt.Sprintf("%s  %s\n", m.bar.ViewAs(pct), elapsed))
 }

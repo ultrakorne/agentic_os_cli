@@ -13,22 +13,29 @@ import (
 // terminal's color profile via termenv and strips styling when stdout isn't a
 // TTY, so piping or redirecting these commands still produces clean text.
 //
-// Palette uses ANSI 256-color indices rather than hex so the output remains
-// legible on both light and dark backgrounds without baking in a theme.
+// Palette uses ANSI base 0-15 indices so the terminal's active theme decides
+// the actual hues — accents, status, and muted text follow whichever scheme
+// the user has configured (Dracula, Solarized, Gruvbox, light/dark, …).
+// Anything 16-255 would be a fixed 256-cube slot and ignore the user's theme.
 var (
-	colorAccent   = lipgloss.Color("99")  // purple
-	colorMuted    = lipgloss.Color("245") // gray
-	colorRunning  = lipgloss.Color("214") // amber
-	colorSuccess  = lipgloss.Color("42")  // green
-	colorError    = lipgloss.Color("203") // red
-	colorWarning  = lipgloss.Color("220") // yellow
-	colorHeader   = lipgloss.Color("117") // sky blue
-	colorEmphasis = lipgloss.Color("252") // light gray (slightly above muted)
+	colorAccent   = lipgloss.Color("4")  // blue   — primary accent
+	colorMuted    = lipgloss.Color("8")  // bright black / gray
+	colorRunning  = lipgloss.Color("3")  // yellow — in-progress
+	colorSuccess  = lipgloss.Color("2")  // green
+	colorError    = lipgloss.Color("1")  // red
+	colorWarning  = lipgloss.Color("11") // bright yellow — distinct from running
+	colorHeader   = lipgloss.Color("6")  // cyan   — secondary accent
+	colorEmphasis = lipgloss.Color("15") // bright white / theme foreground
 
 	styleHeader = lipgloss.NewStyle().Foreground(colorHeader).Bold(true)
-	styleLabel  = lipgloss.NewStyle().Foreground(colorMuted)
-	styleValue  = lipgloss.NewStyle().Foreground(colorEmphasis)
-	styleMuted  = lipgloss.NewStyle().Foreground(colorMuted)
+	// styleLabel / styleMuted use the SGR Faint attribute instead of a fixed
+	// foreground so they stay legible on any theme. ANSI 8 (bright black) is
+	// dim by design, but on some themes it sits almost on top of the
+	// background; Faint asks the terminal to dim *its* default fg, which is
+	// always a guaranteed readable contrast away from the background.
+	styleLabel = lipgloss.NewStyle().Faint(true)
+	styleValue = lipgloss.NewStyle().Foreground(colorEmphasis)
+	styleMuted = lipgloss.NewStyle().Faint(true)
 	styleAccent = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	styleWarn   = lipgloss.NewStyle().Foreground(colorWarning)
 	styleErr    = lipgloss.NewStyle().Foreground(colorError).Bold(true)

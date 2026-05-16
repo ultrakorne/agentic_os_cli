@@ -129,7 +129,7 @@ func printRunHuman(stub map[string]any) error {
 		{Key: "run", Value: fmt.Sprint(stub["id"])},
 		{Key: "status", Value: fmt.Sprint(stub["status"]), Style: &statusS},
 		{Key: "estimate", Value: estimateString(stub["estimate"])},
-		{Key: "startedAt", Value: fmt.Sprint(stub["startedAt"])},
+		{Key: "startedAt", Value: formatStartedAt(fmt.Sprint(stub["startedAt"]))},
 	})
 	return nil
 }
@@ -139,7 +139,9 @@ func estimateString(v any) string {
 	if !ok || ms < 0 {
 		return "none"
 	}
-	return (time.Duration(ms) * time.Millisecond).String()
+	// Round to 100 ms (~1 decimal of a second) so the stub prints clean values
+	// like "1.2s" or "1m23.5s" instead of full ns-precision output.
+	return (time.Duration(ms) * time.Millisecond).Round(100 * time.Millisecond).String()
 }
 
 // spawnWrapperDetached starts wrapper.sh in a new session so it survives this

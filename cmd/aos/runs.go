@@ -91,7 +91,7 @@ func printRunsHuman(runs []scheduler.JobRun) error {
 	for _, r := range runs {
 		rows = append(rows, []string{
 			r.ID, r.JobID, string(r.Status), r.Trigger,
-			r.StartedAt, elapsedString(r), exitString(r),
+			formatStartedAt(r.StartedAt), elapsedString(r), exitString(r),
 		})
 	}
 	t := newTable(
@@ -119,10 +119,10 @@ func printOneRunHuman(r scheduler.JobRun) error {
 		{Key: "agent", Value: r.JobID},
 		{Key: "status", Value: string(r.Status), Style: &statusS},
 		{Key: "trigger", Value: r.Trigger},
-		{Key: "startedAt", Value: r.StartedAt},
+		{Key: "startedAt", Value: formatStartedAt(r.StartedAt)},
 	}
 	if r.EndedAt != nil && *r.EndedAt != "" {
-		rows = append(rows, kvRow{Key: "endedAt", Value: *r.EndedAt})
+		rows = append(rows, kvRow{Key: "endedAt", Value: formatStartedAt(*r.EndedAt)})
 	}
 	rows = append(rows,
 		kvRow{Key: "elapsed", Value: elapsedString(r)},
