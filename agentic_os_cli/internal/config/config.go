@@ -9,8 +9,27 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// DefaultRunsHardCap is the maximum number of distinct runs (each run pairs a
+// .json metadata file with up to one .out output file) kept under
+// <aos_home>/runs/. `aos refresh` deletes the oldest pairs once the count
+// exceeds this cap.
+const DefaultRunsHardCap = 2000
+
 type Config struct {
 	AosHome string `toml:"aos_home"`
+	// RunsHardCap is the on-disk runs cap. Zero or negative values fall back
+	// to DefaultRunsHardCap when consumed via EffectiveRunsHardCap.
+	RunsHardCap int `toml:"runs_hard_cap"`
+}
+
+// EffectiveRunsHardCap returns the configured cap or DefaultRunsHardCap when
+// unset. Centralizing the fallback keeps the TOML free of an explicit default
+// while letting users override it.
+func (c *Config) EffectiveRunsHardCap() int {
+	if c == nil || c.RunsHardCap <= 0 {
+		return DefaultRunsHardCap
+	}
+	return c.RunsHardCap
 }
 
 func Dir() (string, error) {

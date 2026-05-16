@@ -5,7 +5,10 @@ import type { JobRun } from './types'
 const DEFAULT_CACHE_LIMIT = 500
 const DEBOUNCE_MS = 250
 const OUTPUT_TAIL_BYTES = 4096
-const RUNS_HARD_CAP = 2000 // max distinct runs (each run = 1 .json + up to 1 .out)
+
+// Disk GC for <aos_home>/runs/ lives in `aos refresh` (internal/runsgc),
+// keeping the "CLI owns everything that touches the system" invariant.
+// The renderer only reads here.
 
 export class RunsStore {
   private cache = new Map<string, JobRun>()
@@ -21,7 +24,6 @@ export class RunsStore {
   async load(): Promise<void> {
     await fs.mkdir(this.runsDir, { recursive: true })
     await this.indexRunsDir()
-    await this.gcRunsDir()
   }
 
   private async indexRunsDir(): Promise<void> {
@@ -113,49 +115,6 @@ export class RunsStore {
     const sorted = [...this.cache.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt))
     const toRemove = sorted.length - this.cacheLimit
     for (let i = 0; i < toRemove; i++) this.cache.delete(sorted[i].id)
-  }
-
-  private async gcRunsDir(): Promise<void> {
-    let entries: string[]
-    try {
-      entries = await fs.readdir(this.runsDir)
-    } catch {
-      return
-    }
-
-    // Group <run-id>.json + <run-id>.out together so the GC always deletes
-    // them as a pair — never leaves an orphan .out behind when its .json
-    // ages out (or vice versa).
-    const runs = new Map<string, { files: string[]; mtime: number }>()
-    for (const name of entries) {
-      const dot = name.lastIndexOf('.')
-      if (dot < 0) continue
-      const stem = name.slice(0, dot)
-      const ext = name.slice(dot)
-      if (ext !== '.json' && ext !== '.out') continue
-      let entry = runs.get(stem)
-      if (!entry) {
-        entry = { files: [], mtime: 0 }
-        runs.set(stem, entry)
-      }
-      entry.files.push(name)
-      try {
-        const s = await fs.stat(join(this.runsDir, name))
-        if (s.mtimeMs > entry.mtime) entry.mtime = s.mtimeMs
-      } catch {
-        /* file removed mid-scan */
-      }
-    }
-
-    if (runs.size <= RUNS_HARD_CAP) return
-
-    const sorted = [...runs.values()].sort((a, b) => a.mtime - b.mtime)
-    const drop = sorted.slice(0, sorted.length - RUNS_HARD_CAP)
-    for (const run of drop) {
-      for (const f of run.files) {
-        await fs.unlink(join(this.runsDir, f)).catch(() => {})
-      }
-    }
   }
 }
 

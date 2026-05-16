@@ -61,6 +61,7 @@ export type RefreshSummary = {
   python3: string
   daemon: string
   log: string
+  runs: string
 }
 
 // Runtime view of the CLI: if cliMissing the renderer must block all

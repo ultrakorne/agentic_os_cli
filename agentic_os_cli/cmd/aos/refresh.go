@@ -13,6 +13,7 @@ import (
 	"github.com/ultrakorne/aos_cli/internal/config"
 	"github.com/ultrakorne/aos_cli/internal/crontab"
 	"github.com/ultrakorne/aos_cli/internal/logtrim"
+	"github.com/ultrakorne/aos_cli/internal/runsgc"
 	"github.com/ultrakorne/aos_cli/internal/runtime"
 	"github.com/ultrakorne/aos_cli/internal/scheduler"
 )
@@ -48,6 +49,9 @@ func printRefreshHuman(s RefreshSummary) {
 		case v == "ok" || v == "wrote" || v == "unchanged" || v == "trimmed" || v == "untouched":
 			st := lipgloss.NewStyle().Foreground(colorSuccess)
 			return &st
+		case strings.HasPrefix(v, "swept:"):
+			st := lipgloss.NewStyle().Foreground(colorSuccess)
+			return &st
 		case strings.HasPrefix(v, "skipped"):
 			st := styleWarn
 			return &st
@@ -67,6 +71,7 @@ func printRefreshHuman(s RefreshSummary) {
 		{Key: "python3", Value: s.Python3, Style: healthStyle(s.Python3)},
 		{Key: "daemon", Value: s.Daemon, Style: healthStyle(s.Daemon)},
 		{Key: "log", Value: s.Log, Style: healthStyle(s.Log)},
+		{Key: "runs", Value: s.Runs, Style: healthStyle(s.Runs)},
 	})
 }
 
@@ -87,19 +92,20 @@ type RefreshSummary struct {
 	Python3   string `json:"python3"` // ok | missing
 	Daemon    string `json:"daemon"`  // ok | down | unknown
 	Log       string `json:"log"`     // trimmed | untouched
+	Runs      string `json:"runs"`    // untouched | swept:<n> | skipped:<reason>
 }
 
 func (s RefreshSummary) OneLine() string {
 	return fmt.Sprintf(
-		"aos refresh agents=%d scheduled=%d issues=%d cron=%s wrapper=%s python3=%s daemon=%s log=%s",
-		s.Agents, s.Scheduled, s.Issues, s.Cron, s.Wrapper, s.Python3, s.Daemon, s.Log,
+		"aos refresh agents=%d scheduled=%d issues=%d cron=%s wrapper=%s python3=%s daemon=%s log=%s runs=%s",
+		s.Agents, s.Scheduled, s.Issues, s.Cron, s.Wrapper, s.Python3, s.Daemon, s.Log, s.Runs,
 	)
 }
 
 // RunRefresh executes the refresh pipeline in-process. init.go calls this
 // directly after writing the config so we don't shell out to ourselves.
 func RunRefresh() (RefreshSummary, error) {
-	sum := RefreshSummary{Cron: "skipped:unknown", Wrapper: "missing", Python3: "missing", Daemon: "unknown", Log: "untouched"}
+	sum := RefreshSummary{Cron: "skipped:unknown", Wrapper: "missing", Python3: "missing", Daemon: "unknown", Log: "untouched", Runs: "untouched"}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -208,6 +214,13 @@ func RunRefresh() (RefreshSummary, error) {
 	trimmed, err := logtrim.Trim(filepath.Join(cfg.AosHome, "tick.log"), logtrim.DefaultMaxBytes, logtrim.DefaultKeepBytes)
 	if err == nil && trimmed {
 		sum.Log = "trimmed"
+	}
+
+	runsRes, err := runsgc.Sweep(filepath.Join(cfg.AosHome, "runs"), cfg.EffectiveRunsHardCap())
+	if err != nil {
+		sum.Runs = "skipped:" + sanitize(err.Error())
+	} else if runsRes.Deleted > 0 {
+		sum.Runs = fmt.Sprintf("swept:%d", runsRes.Deleted)
 	}
 
 	return sum, nil
