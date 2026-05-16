@@ -25,7 +25,7 @@ both surfaces consistent: every `--json` branch funnels through `printJSON`
 | [`aos list`](#aos-list) | Enumerate every agent with section, schedule summary, description |
 | [`aos describe <id> [text]`](#aos-describe) | Show one agent's full record; optionally rewrite its description |
 | [`aos schedule <id> ...`](#aos-schedule) | Set or clear an agent's schedule; auto-refreshes cron |
-| [`aos run <id>`](#aos-run) | Fire a manual run; prints the `JobRun` stub |
+| [`aos run <id>`](#aos-run) | Fire a manual run; prints the `JobRun` stub (optional `--wait` blocks until done and prints `.out`) |
 | [`aos runs [run-id]`](#aos-runs) | List recent runs, or show one by id (with `--output` to dump the .out) |
 | [`aos uninstall`](#aos-uninstall) | Remove wrapper, managed crontab block, and config |
 
@@ -299,8 +299,10 @@ case.
 ## `aos run`
 
 ```
-aos run <id>          # spawn a manual run; prints the JobRun stub
+aos run <id>                  # spawn a manual run; prints the JobRun stub and exits
 aos run <id> --json
+aos run <id> --wait           # spawn, then block until done; prints .out on stdout
+aos run <id> --wait --json    # spawn, print stub JSON, block, then append .out
 ```
 
 Looks up the agent by id, estimates duration from the newest completed runs
@@ -331,6 +333,31 @@ startedAt  2026-05-16T13:09:37.061Z
 `status: "running"`, `endedAt: null`, `exitCode: null`, `output: ""`, plus
 `estimate` in milliseconds (`-1` when unknown). The persisted run record the
 wrapper later writes does not include `estimate`.
+
+### `--wait`
+
+`aos run <id> --wait` keeps the same stub-first behavior — the stub still
+prints to stdout immediately after `wrapper.sh` is spawned — and then blocks
+until the wrapper writes a terminal record (`success` / `error`).
+
+- **Progress UI on stderr.** While waiting, a Bubble Tea progress bar (when
+  an estimate exists) or spinner (when it doesn't) renders on **stderr** so
+  the run summary on stdout stays untouched. Piping stdout into another tool
+  is unaffected.
+- **`.out` on stdout after the wait.** Once the wrapper finishes, the raw
+  bytes of `<aos_home>/runs/<run-id>.out` are written to stdout, so:
+    - Human: `stub block → progress on stderr → .out bytes` on stdout
+    - `--json`: `stub JSON → progress on stderr → .out bytes` appended to
+      stdout. Stdout intentionally ends up as "JSON then output"; consumers
+      that want only the structured record should drop `--wait`.
+- **Ctrl+C while waiting** stops the polling loop, prints a one-line message
+  to stderr citing the run id ("run is still executing in the background"),
+  and exits non-zero. The wrapper was spawned detached, so the agent run
+  itself is unaffected — `aos runs <run-id>` will surface the result once
+  it eventually finishes.
+- **Failed runs** print `.out` first (so stderr emitted by the script is
+  preserved for the operator), then `aos run --wait` returns a non-zero exit
+  code carrying the underlying status code (`run <id> exited with code N`).
 
 ## `aos runs`
 

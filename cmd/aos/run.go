@@ -18,6 +18,8 @@ import (
 	"github.com/ultrakorne/aos_cli/internal/scheduler"
 )
 
+var runWaitFlag bool
+
 var runCmd = &cobra.Command{
 	Use:   "run <id>",
 	Short: "Spawn a manual run of an agent in the background",
@@ -29,7 +31,11 @@ the wrapper writes the final status to <aos_home>/runs/<run-id>.json.
 The trigger is set to "manual" via AGENTIC_OS_TRIGGER so the on-disk record is
 distinguishable from cron-driven runs. The run id is pre-generated here and
 threaded as the wrapper's 5th argv, so the printed stub's id matches the file
-the wrapper writes.`,
+the wrapper writes.
+
+Pass --wait to block until the wrapper finishes; the stub still prints first,
+then a progress/spinner shows on stderr while polling, then the .out bytes
+print to stdout. With --json --wait the stub JSON prints first, then output.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runRun,
 }
@@ -61,11 +67,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	runID := newRunID()
-	startedAt := isoMillisUTC(time.Now())
+	now := time.Now()
+	startedAt := isoMillisUTC(now)
+	estimateDur := time.Duration(-1)
 	estimateMillis := int64(-1)
 	if estimate, ok, err := scheduler.EstimateRunDuration(filepath.Join(cfg.AosHome, "runs"), agent.ID, 10); err != nil {
 		return fmt.Errorf("estimate run duration: %w", err)
 	} else if ok {
+		estimateDur = estimate
 		estimateMillis = estimate.Truncate(time.Millisecond).Milliseconds()
 	}
 
@@ -75,9 +84,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	stub := jobRunStub(runID, agent.ID, startedAt, estimateMillis)
 	if JSONOutput() {
-		return printJSON(stub)
+		if err := printJSON(stub); err != nil {
+			return err
+		}
+	} else if err := printRunHuman(stub); err != nil {
+		return err
 	}
-	return printRunHuman(stub)
+
+	if !runWaitFlag {
+		return nil
+	}
+	return waitFlow(filepath.Join(cfg.AosHome, "runs"), runID, agent.ID, now, estimateDur)
 }
 
 // jobRunStub mirrors the JobRun JSON shape the renderer expects, plus an
@@ -162,5 +179,6 @@ func newRunID() string {
 }
 
 func init() {
+	runCmd.Flags().BoolVar(&runWaitFlag, "wait", false, "block until the run finishes, then print its .out to stdout")
 	rootCmd.AddCommand(runCmd)
 }
