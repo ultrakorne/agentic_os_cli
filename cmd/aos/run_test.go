@@ -33,6 +33,7 @@ func TestJobRunStub_shape(t *testing.T) {
 		"error":      nil,
 		"exitCode":   nil,
 		"outputPath": "r-1.out",
+		"estimate":   float64(-1),
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -41,6 +42,13 @@ func TestJobRunStub_shape(t *testing.T) {
 	}
 	if len(got) != len(want) {
 		t.Errorf("unexpected keys: got=%v want=%v", got, want)
+	}
+}
+
+func TestJobRunStub_usesEstimate(t *testing.T) {
+	stub := jobRunStub("r-1", "planner", "2026-01-01T00:00:00.000Z", 2031)
+	if got := stub["estimate"]; got != int64(2031) {
+		t.Errorf("estimate = %v, want 2031", got)
 	}
 }
 
@@ -65,7 +73,7 @@ func TestNewRunID_isUnique(t *testing.T) {
 
 // TestSpawnWrapperDetached_passesArgsAndTriggerEnv runs a fake wrapper that
 // records its argv and AGENTIC_OS_TRIGGER to a log file, then asserts both.
-// Locks in the cron/manual argv contract: <aos_home> '' <agent_id> <script> <run_id>.
+// Locks in the cron/manual argv contract: <aos_home> ” <agent_id> <script> <run_id>.
 func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
 	tmp := t.TempDir()
 	wrapper := filepath.Join(tmp, "wrapper.sh")

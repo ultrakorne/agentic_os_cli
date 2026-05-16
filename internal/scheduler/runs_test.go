@@ -31,6 +31,29 @@ func writeRunMeta(t *testing.T, dir, id, jobID, startedAt, status string) {
 	}
 }
 
+func writeFinishedRunMeta(t *testing.T, dir, id, jobID, startedAt, endedAt string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := fmt.Sprintf(`{
+  "id": %q,
+  "jobId": %q,
+  "scheduleId": null,
+  "trigger": "manual",
+  "startedAt": %q,
+  "endedAt": %q,
+  "status": "success",
+  "output": "",
+  "error": null,
+  "exitCode": 0,
+  "outputPath": %q
+}`, id, jobID, startedAt, endedAt, id+".out")
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+}
+
 func TestReadRuns_emptyDirIsNoError(t *testing.T) {
 	dir := t.TempDir()
 	runs, err := ReadRuns(dir, "", 100)
@@ -138,6 +161,41 @@ func TestReadRun_returnsNotFound(t *testing.T) {
 	var nf NotFoundError
 	if !errors.As(err, &nf) {
 		t.Errorf("expected NotFoundError, got %T: %v", err, err)
+	}
+}
+
+func TestEstimateRunDuration_averagesNewestCompletedRuns(t *testing.T) {
+	dir := t.TempDir()
+	for i := 1; i <= 11; i++ {
+		started := fmt.Sprintf("2026-05-16T13:%02d:00.000Z", i)
+		ended := fmt.Sprintf("2026-05-16T13:%02d:%02d.000Z", i, i)
+		writeFinishedRunMeta(t, dir, fmt.Sprintf("r%d", i), "ping", started, ended)
+	}
+	writeFinishedRunMeta(t, dir, "other", "pong", "2026-05-16T14:00:00.000Z", "2026-05-16T14:00:30.000Z")
+	writeRunMeta(t, dir, "running", "ping", "2026-05-16T14:01:00.000Z", "running")
+
+	got, ok, err := EstimateRunDuration(dir, "ping", 10)
+	if err != nil {
+		t.Fatalf("EstimateRunDuration: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected estimate")
+	}
+	if got != 6500_000_000 {
+		t.Errorf("estimate = %s, want 6.5s", got)
+	}
+}
+
+func TestEstimateRunDuration_returnsFalseWithoutCompletedRuns(t *testing.T) {
+	dir := t.TempDir()
+	writeRunMeta(t, dir, "running", "ping", "2026-05-16T14:01:00.000Z", "running")
+
+	got, ok, err := EstimateRunDuration(dir, "ping", 10)
+	if err != nil {
+		t.Fatalf("EstimateRunDuration: %v", err)
+	}
+	if ok || got != 0 {
+		t.Errorf("estimate = %s, %v; want 0, false", got, ok)
 	}
 }
 

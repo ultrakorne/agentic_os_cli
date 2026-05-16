@@ -105,6 +105,40 @@ func ReadRuns(runsDir, agentID string, limit int) ([]JobRun, error) {
 	return out, nil
 }
 
+// EstimateRunDuration averages the elapsed time of the newest completed runs
+// for agentID, capped at limit. Runs without a parseable endedAt are ignored.
+func EstimateRunDuration(runsDir, agentID string, limit int) (time.Duration, bool, error) {
+	runs, err := ReadRuns(runsDir, agentID, 0)
+	if err != nil {
+		return 0, false, err
+	}
+	var total time.Duration
+	count := 0
+	for _, r := range runs {
+		if limit > 0 && count >= limit {
+			break
+		}
+		if r.EndedAt == nil || *r.EndedAt == "" {
+			continue
+		}
+		start, err1 := time.Parse(time.RFC3339Nano, r.StartedAt)
+		end, err2 := time.Parse(time.RFC3339Nano, *r.EndedAt)
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		elapsed := end.Sub(start)
+		if elapsed < 0 {
+			continue
+		}
+		total += elapsed
+		count++
+	}
+	if count == 0 {
+		return 0, false, nil
+	}
+	return total / time.Duration(count), true, nil
+}
+
 // ReadRun reads one run by id. Returns NotFoundError if the file is absent.
 func ReadRun(runsDir, runID string) (JobRun, error) {
 	path := filepath.Join(runsDir, runID+".json")

@@ -303,11 +303,17 @@ aos run <id>          # spawn a manual run; prints the JobRun stub
 aos run <id> --json
 ```
 
-Looks up the agent by id, mints a run id (`<unix>-<pid>-<rand><rand>`),
+Looks up the agent by id, estimates duration from the newest completed runs
+for that agent (up to 10), mints a run id (`<unix>-<pid>-<rand><rand>`),
 spawns `wrapper.sh` detached (`setsid`) with `AGENTIC_OS_TRIGGER=manual` and
 the explicit run id as the wrapper's 5th argv, then prints a `JobRun` stub.
 The wrapper writes the final record under `<aos_home>/runs/<run-id>.json`
 once the script exits — poll for it (or watch the file) to see the result.
+
+The estimate uses completed records with parseable `startedAt` and `endedAt`.
+If the agent has no completed history, human output prints `estimate  none`
+and JSON prints `"estimate": -1`. Otherwise JSON `estimate` is the average
+elapsed time in milliseconds.
 
 Errors exit non-zero with the message on stderr: missing agent, wrapper
 absent / not executable.
@@ -317,12 +323,14 @@ absent / not executable.
 aos run ping
 run        1778936977-29334-...
 status     running
+estimate   2.031s
 startedAt  2026-05-16T13:09:37.061Z
 ```
 
 **JSON output:** the same shape as `aos runs <run-id> --json` with
-`status: "running"`, `endedAt: null`, `exitCode: null`, `output: ""`. The
-renderer's `JobRun` type (`src/shared/scheduler.ts`) matches one-to-one.
+`status: "running"`, `endedAt: null`, `exitCode: null`, `output: ""`, plus
+`estimate` in milliseconds (`-1` when unknown). The persisted run record the
+wrapper later writes does not include `estimate`.
 
 ## `aos runs`
 
