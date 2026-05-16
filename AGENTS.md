@@ -20,11 +20,19 @@ go vet ./...                # static checks
 
 Install procedure for end users lives in `README.md`.
 
+## Output: humans vs. clients
+
+Every verb has two output modes, and **every new verb must implement both**:
+
+- **Human (default)** — styled with [lipgloss](https://github.com/charmbracelet/lipgloss) for a clean terminal view: rounded-border tables for listings, right-aligned key/value blocks for single records, colored status / health fields, accent-banner per command. Never write raw `tabwriter` rows or inline ANSI escapes — use the shared helpers in `cmd/aos/style.go`: `banner`, `printKV`, `newTable`, `statusStyle`, plus the `style*` / `color*` palette. Lipgloss auto-detects the terminal's color profile via termenv and strips styling when stdout isn't a TTY, so piping/redirecting still produces clean text.
+- **`--json` (clients and agents)** — a persistent root flag (`JSONOutput()`); the Electron app and any scripted agent consumes this. Every `--json` branch must go through `printJSON` so indentation and trailing-newline behavior stay uniform. **The JSON shape is the contract**: restyle the human output freely, but don't rename or retype `--json` fields without bumping the consumers (Electron `src/shared/scheduler.ts`, agent integrations).
+
+When adding a new verb, the runner ends with `if JSONOutput() { return printJSON(payload) }; return printHumanFn(payload)` — never just one or the other.
+
 ## Conventions
 
 - Embedded assets are the source of truth — `aos init` overwrites the on-disk copy if it drifts from `resources.WrapperSh`.
 - Cross-platform paths via `filepath.Join`; never hardcode separators.
 - Errors wrap with `fmt.Errorf("context: %w", err)` so callers can `errors.Is`/`As`.
-- Keep shared package-local helpers (e.g. `sanitize`) in a neutral file like `format.go`, not in a command-specific file.
-- Every verb supports a persistent `--json` flag (`JSONOutput()`); machine output goes through `printJSON` for one indent rule everywhere. Human output uses lipgloss via the `style.go` helpers (`printKV`, `newTable`, `banner`, `statusStyle`) — never inline ANSI escapes. Lipgloss strips styling when stdout isn't a TTY, so piping stays clean.
-- The JSON shape is the contract for clients (Electron, agents). Restyle the human output freely, but don't change `--json` field names/types without bumping the consumers.
+- Keep shared package-local helpers (e.g. `sanitize`) in a neutral file like `format.go` or `style.go`, not in a command-specific file.
+- Commands that take a required positional arg (`init`, `describe`, `schedule`, `run`) use `cobra.MaximumNArgs(N)` plus a `len(args) == 0 → cmd.Help()` short-circuit so `aos <verb>` prints usage instead of a terse "accepts 1 arg(s)" error.
