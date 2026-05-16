@@ -62,22 +62,33 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	runID := newRunID()
 	startedAt := isoMillisUTC(time.Now())
+	estimateMillis := int64(-1)
+	if estimate, ok, err := scheduler.EstimateRunDuration(filepath.Join(cfg.AosHome, "runs"), agent.ID, 10); err != nil {
+		return fmt.Errorf("estimate run duration: %w", err)
+	} else if ok {
+		estimateMillis = estimate.Truncate(time.Millisecond).Milliseconds()
+	}
 
 	if err := spawnWrapperDetached(wrapperPath, cfg.AosHome, agent.ID, agent.ScriptPath, runID); err != nil {
 		return fmt.Errorf("spawn wrapper: %w", err)
 	}
 
-	stub := jobRunStub(runID, agent.ID, startedAt)
+	stub := jobRunStub(runID, agent.ID, startedAt, estimateMillis)
 	if JSONOutput() {
 		return printJSON(stub)
 	}
 	return printRunHuman(stub)
 }
 
-// jobRunStub mirrors the JobRun JSON shape the renderer expects
-// (src/shared/scheduler.ts). The wrapper overwrites the on-disk record once it
-// finishes; this stub only documents what the caller can poll for.
-func jobRunStub(runID, agentID, startedAt string) map[string]any {
+// jobRunStub mirrors the JobRun JSON shape the renderer expects, plus an
+// estimate field for the launcher response. The wrapper overwrites the on-disk
+// record once it finishes; this stub only documents what the caller can poll
+// for.
+func jobRunStub(runID, agentID, startedAt string, estimateMillis ...int64) map[string]any {
+	estimate := int64(-1)
+	if len(estimateMillis) > 0 {
+		estimate = estimateMillis[0]
+	}
 	return map[string]any{
 		"id":         runID,
 		"jobId":      agentID,
@@ -90,6 +101,7 @@ func jobRunStub(runID, agentID, startedAt string) map[string]any {
 		"error":      nil,
 		"exitCode":   nil,
 		"outputPath": runID + ".out",
+		"estimate":   estimate,
 	}
 }
 
@@ -99,9 +111,18 @@ func printRunHuman(stub map[string]any) error {
 	printKV([]kvRow{
 		{Key: "run", Value: fmt.Sprint(stub["id"])},
 		{Key: "status", Value: fmt.Sprint(stub["status"]), Style: &statusS},
+		{Key: "estimate", Value: estimateString(stub["estimate"])},
 		{Key: "startedAt", Value: fmt.Sprint(stub["startedAt"])},
 	})
 	return nil
+}
+
+func estimateString(v any) string {
+	ms, ok := v.(int64)
+	if !ok || ms < 0 {
+		return "none"
+	}
+	return (time.Duration(ms) * time.Millisecond).String()
 }
 
 // spawnWrapperDetached starts wrapper.sh in a new session so it survives this

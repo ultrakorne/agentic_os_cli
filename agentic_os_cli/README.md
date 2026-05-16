@@ -43,7 +43,7 @@ aos tick                 # one scheduler tick (cron invokes this automatically)
 aos list                 # list every agent with its schedule and description
 aos describe <id>        # show one agent's full record (or set its description)
 aos schedule <id> ...    # set or clear an agent's schedule, then refresh cron
-aos run <id>             # fire a manual run; prints the JobRun stub
+aos run <id>             # fire a manual run; prints the JobRun stub and estimate
 aos runs                 # list recent runs (sorted newest first)
 aos runs <run-id>        # show one run's record; add --output to dump its .out
 aos uninstall            # remove wrapper, managed crontab block, and config
