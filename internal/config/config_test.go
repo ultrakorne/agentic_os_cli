@@ -110,6 +110,41 @@ func TestRemoveMissingIsNoop(t *testing.T) {
 	}
 }
 
+func TestEffectiveRunsHardCapDefaultsWhenUnset(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *Config
+		want int
+	}{
+		{"nil config", nil, DefaultRunsHardCap},
+		{"zero value", &Config{}, DefaultRunsHardCap},
+		{"negative value", &Config{RunsHardCap: -5}, DefaultRunsHardCap},
+		{"explicit override", &Config{RunsHardCap: 250}, 250},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.EffectiveRunsHardCap(); got != tc.want {
+				t.Errorf("EffectiveRunsHardCap = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSaveLoadPreservesRunsHardCap(t *testing.T) {
+	withFakeHome(t)
+	want := &Config{AosHome: "/tmp/x", RunsHardCap: 500}
+	if err := Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got == nil || got.RunsHardCap != 500 {
+		t.Errorf("Load = %+v, want RunsHardCap=500", got)
+	}
+}
+
 func TestRemoveLeavesNonEmptyDir(t *testing.T) {
 	withFakeHome(t)
 	if err := Save(&Config{AosHome: "/tmp/x"}); err != nil {
