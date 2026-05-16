@@ -1,13 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/ultrakorne/aos_cli/internal/config"
@@ -28,16 +28,54 @@ var refreshCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		if JSONOutput() {
-			buf, jerr := json.MarshalIndent(s, "", "  ")
-			if jerr != nil {
+			if jerr := printJSON(s); jerr != nil {
 				fmt.Fprintln(os.Stderr, jerr)
 				os.Exit(1)
 			}
-			fmt.Println(string(buf))
 			return
 		}
-		fmt.Println(s.OneLine())
+		banner("refresh")
+		printRefreshHuman(s)
 	},
+}
+
+// printRefreshHuman renders the refresh summary as a key/value block, color
+// coding the runtime-health fields so a degraded install (missing wrapper,
+// cron daemon down, etc.) stands out at a glance.
+func printRefreshHuman(s RefreshSummary) {
+	healthStyle := func(v string) *lipgloss.Style {
+		switch {
+		case v == "ok" || v == "wrote" || v == "unchanged" || v == "trimmed" || v == "untouched":
+			st := lipgloss.NewStyle().Foreground(colorSuccess)
+			return &st
+		case strings.HasPrefix(v, "skipped"):
+			st := styleWarn
+			return &st
+		case v == "missing" || v == "down":
+			st := styleErr
+			return &st
+		default:
+			return nil
+		}
+	}
+	printKV([]kvRow{
+		{Key: "agents", Value: fmt.Sprintf("%d", s.Agents)},
+		{Key: "scheduled", Value: fmt.Sprintf("%d", s.Scheduled)},
+		{Key: "issues", Value: fmt.Sprintf("%d", s.Issues), Style: issueStyle(s.Issues)},
+		{Key: "cron", Value: s.Cron, Style: healthStyle(s.Cron)},
+		{Key: "wrapper", Value: s.Wrapper, Style: healthStyle(s.Wrapper)},
+		{Key: "python3", Value: s.Python3, Style: healthStyle(s.Python3)},
+		{Key: "daemon", Value: s.Daemon, Style: healthStyle(s.Daemon)},
+		{Key: "log", Value: s.Log, Style: healthStyle(s.Log)},
+	})
+}
+
+func issueStyle(n int) *lipgloss.Style {
+	if n == 0 {
+		return nil
+	}
+	st := styleWarn
+	return &st
 }
 
 type RefreshSummary struct {

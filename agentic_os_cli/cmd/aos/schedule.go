@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -45,11 +44,14 @@ var scheduleCmd = &cobra.Command{
 
 Pass --off to clear an existing schedule. After a successful write, cron is
 reconciled in-process (same as ` + "`aos refresh`" + `).`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runSchedule,
 }
 
 func runSchedule(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
 	id := args[0]
 	cfg, err := config.Load()
 	if err != nil {
@@ -206,22 +208,39 @@ func parseDay(raw string) (scheduler.Weekday, error) {
 }
 
 func printScheduleHuman(id string, meta scheduler.AgentMeta, refresh RefreshSummary, refErr error) error {
+	banner("schedule " + id)
 	if meta.Schedule == nil {
-		fmt.Printf("aos schedule id=%s cleared | %s\n", id, refreshLine(refresh, refErr))
-		return nil
+		clearedStyle := styleMuted
+		printKV([]kvRow{{Key: "schedule", Value: "cleared", Style: &clearedStyle}})
+	} else {
+		rows := []kvRow{{Key: "kind", Value: meta.Schedule.Kind}}
+		switch meta.Schedule.Kind {
+		case "hourly":
+			rows = append(rows,
+				kvRow{Key: "everyHours", Value: fmt.Sprintf("%d", meta.Schedule.EveryHours)},
+				kvRow{Key: "minute", Value: fmt.Sprintf("%d", meta.Schedule.Minute)},
+			)
+		case "daily":
+			rows = append(rows,
+				kvRow{Key: "days", Value: joinDays(meta.Schedule.Days)},
+				kvRow{Key: "hour", Value: fmt.Sprintf("%d", meta.Schedule.Hour)},
+				kvRow{Key: "minute", Value: fmt.Sprintf("%d", meta.Schedule.Minute)},
+			)
+		}
+		if cronExpr, err := scheduler.CompileToCron(*meta.Schedule); err == nil {
+			rows = append(rows, kvRow{Key: "cron", Value: cronExpr})
+		}
+		if meta.ScheduledAt != "" {
+			rows = append(rows, kvRow{Key: "scheduledAt", Value: meta.ScheduledAt})
+		}
+		printKV(rows)
 	}
-	cronExpr, _ := scheduler.CompileToCron(*meta.Schedule)
-	switch meta.Schedule.Kind {
-	case "hourly":
-		fmt.Printf("aos schedule id=%s kind=hourly everyHours=%d minute=%d cron=%q scheduledAt=%s | %s\n",
-			id, meta.Schedule.EveryHours, meta.Schedule.Minute, cronExpr, meta.ScheduledAt, refreshLine(refresh, refErr))
-	case "daily":
-		days := joinDays(meta.Schedule.Days)
-		fmt.Printf("aos schedule id=%s kind=daily days=%s hour=%d minute=%d cron=%q scheduledAt=%s | %s\n",
-			id, days, meta.Schedule.Hour, meta.Schedule.Minute, cronExpr, meta.ScheduledAt, refreshLine(refresh, refErr))
-	default:
-		fmt.Printf("aos schedule id=%s kind=%s scheduledAt=%s | %s\n",
-			id, meta.Schedule.Kind, meta.ScheduledAt, refreshLine(refresh, refErr))
+	fmt.Println(styleMuted.Render("— refresh —"))
+	if refErr != nil {
+		errS := styleErr
+		printKV([]kvRow{{Key: "error", Value: refErr.Error(), Style: &errS}})
+	} else {
+		printRefreshHuman(refresh)
 	}
 	return nil
 }
@@ -242,19 +261,7 @@ func printScheduleJSON(id string, meta scheduler.AgentMeta, refresh RefreshSumma
 	} else {
 		payload["refresh"] = refresh
 	}
-	buf, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(buf))
-	return nil
-}
-
-func refreshLine(r RefreshSummary, err error) string {
-	if err != nil {
-		return "refresh=error(" + sanitize(err.Error()) + ")"
-	}
-	return r.OneLine()
+	return printJSON(payload)
 }
 
 func nullIfEmpty(s string) any {

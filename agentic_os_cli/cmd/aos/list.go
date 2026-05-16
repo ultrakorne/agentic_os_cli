@@ -1,14 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"text/tabwriter"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"github.com/spf13/cobra"
 
 	"github.com/ultrakorne/aos_cli/internal/config"
@@ -55,35 +55,48 @@ func printListJSON(res scheduler.ScanResult) error {
 			"note": iss.Note,
 		})
 	}
-	buf, err := json.MarshalIndent(map[string]any{
+	return printJSON(map[string]any{
 		"agents": items,
 		"issues": issues,
-	}, "", "  ")
-	if err != nil {
-		return err
-	}
-	fmt.Println(string(buf))
-	return nil
+	})
 }
 
 func printListHuman(res scheduler.ScanResult) error {
 	if len(res.Agents) == 0 {
-		fmt.Println("(no agents)")
+		fmt.Println(styleMuted.Render("(no agents)"))
 	} else {
-		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSECTION\tSCHEDULE\tWARNINGS\tDESCRIPTION")
+		rows := make([][]string, 0, len(res.Agents))
 		for _, a := range res.Agents {
 			warn := "-"
 			if len(a.Warnings) > 0 {
 				warn = strings.Join(a.Warnings, ",")
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-				a.ID, a.Section, summarizeSchedule(a.Meta.Schedule), warn, summarizeDescription(a.Meta.Description))
+			rows = append(rows, []string{
+				a.ID,
+				a.Section,
+				summarizeSchedule(a.Meta.Schedule),
+				warn,
+				summarizeDescription(a.Meta.Description),
+			})
 		}
-		w.Flush()
+		t := newTable(
+			[]string{"ID", "SECTION", "SCHEDULE", "WARNINGS", "DESCRIPTION"},
+			rows,
+		).StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return tableHeaderStyle
+			}
+			// Column 3 is WARNINGS — paint anything non-"-" in warn color so
+			// a busy list draws the eye to the agent that needs attention.
+			if col == 3 && rows[row][3] != "-" {
+				return tableCellStyle.Foreground(colorWarning)
+			}
+			return tableCellStyle
+		})
+		fmt.Println(t)
 	}
 	for _, iss := range res.Issues {
-		fmt.Fprintf(os.Stderr, "issue: %s %s — %s\n", iss.Kind, iss.Path, iss.Note)
+		fmt.Fprintln(os.Stderr, styleWarn.Render(fmt.Sprintf("issue: %s %s — %s", iss.Kind, iss.Path, iss.Note)))
 	}
 	return nil
 }

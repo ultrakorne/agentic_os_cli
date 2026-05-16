@@ -1,13 +1,10 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -25,11 +22,14 @@ so a client can use a single parser for both.
 
 With a second positional argument, the description is written before the
 record is printed. An empty string clears it.`,
-	Args: cobra.RangeArgs(1, 2),
+	Args: cobra.MaximumNArgs(2),
 	RunE: runDescribe,
 }
 
 func runDescribe(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -56,47 +56,49 @@ func runDescribe(cmd *cobra.Command, args []string) error {
 
 	rec := agentRecord(agent, meta)
 	if JSONOutput() {
-		buf, err := json.MarshalIndent(rec, "", "  ")
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(buf))
-		return nil
+		return printJSON(rec)
 	}
 	return printAgentHuman(rec)
 }
 
-// printAgentHuman renders the record as a small key/value block. Schedule
+// printAgentHuman renders the record as a styled key/value block. Schedule
 // fields collapse to one line; the description goes last so it isn't
 // truncated and the user can grep/copy it cleanly.
 func printAgentHuman(rec map[string]any) error {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	row := func(k string, v any) {
-		fmt.Fprintf(w, "%s\t%v\n", k, v)
+	banner("describe " + asString(rec["id"]))
+	rows := []kvRow{
+		{Key: "section", Value: asString(rec["section"])},
+		{Key: "script", Value: asString(rec["scriptPath"])},
 	}
-	row("id", rec["id"])
-	row("section", rec["section"])
-	row("script", rec["scriptPath"])
 	if warns, ok := rec["warnings"].([]string); ok && len(warns) > 0 {
-		row("warnings", strings.Join(warns, ","))
+		warnS := styleWarn
+		rows = append(rows, kvRow{Key: "warnings", Value: strings.Join(warns, ","), Style: &warnS})
 	}
 	if sched, ok := rec["schedule"].(*scheduler.ScheduleSpec); ok && sched != nil {
-		row("schedule", summarizeSchedule(sched))
+		rows = append(rows, kvRow{Key: "schedule", Value: summarizeSchedule(sched)})
 		if cronExpr, ok := rec["cron"].(string); ok {
-			row("cron", cronExpr)
+			rows = append(rows, kvRow{Key: "cron", Value: cronExpr})
 		}
 		if ts, ok := rec["scheduledAt"].(string); ok {
-			row("scheduledAt", ts)
+			rows = append(rows, kvRow{Key: "scheduledAt", Value: ts})
 		}
 	} else {
-		row("schedule", "-")
+		rows = append(rows, kvRow{Key: "schedule", Value: "-"})
 	}
 	desc, _ := rec["description"].(string)
-	if desc == "" {
-		desc = "-"
+	rows = append(rows, kvRow{Key: "description", Value: desc})
+	printKV(rows)
+	return nil
+}
+
+func asString(v any) string {
+	if v == nil {
+		return ""
 	}
-	row("description", desc)
-	return w.Flush()
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
 }
 
 func init() {

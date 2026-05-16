@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/ultrakorne/aos_cli/internal/config"
@@ -20,23 +21,52 @@ var uninstallCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		s := runUninstall()
-		fmt.Println(s.OneLine())
+		if JSONOutput() {
+			if err := printJSON(s); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
+		banner("uninstall")
+		printUninstallHuman(s)
 	},
 }
 
 type uninstallSummary struct {
-	Wrapper string // removed | absent
-	Cron    string // removed | unchanged | skipped:<reason>
-	Config  string // removed | absent
-	Kept    []string
+	Wrapper string   `json:"wrapper"` // removed | absent
+	Cron    string   `json:"cron"`    // removed | unchanged | skipped:<reason>
+	Config  string   `json:"config"`  // removed | absent
+	Kept    []string `json:"kept"`
 }
 
-func (s uninstallSummary) OneLine() string {
-	kept := "[]"
-	if len(s.Kept) > 0 {
-		kept = "[" + strings.Join(s.Kept, ",") + "]"
+func printUninstallHuman(s uninstallSummary) {
+	stateStyle := func(v string) *lipgloss.Style {
+		switch {
+		case v == "removed":
+			st := lipgloss.NewStyle().Foreground(colorSuccess)
+			return &st
+		case strings.HasPrefix(v, "skipped"):
+			st := styleWarn
+			return &st
+		default:
+			return nil
+		}
 	}
-	return fmt.Sprintf("aos uninstall wrapper=%s cron=%s config=%s kept=%s", s.Wrapper, s.Cron, s.Config, kept)
+	rows := []kvRow{
+		{Key: "wrapper", Value: s.Wrapper, Style: stateStyle(s.Wrapper)},
+		{Key: "cron", Value: s.Cron, Style: stateStyle(s.Cron)},
+		{Key: "config", Value: s.Config, Style: stateStyle(s.Config)},
+	}
+	keptVal := "(none)"
+	if len(s.Kept) > 0 {
+		keptVal = strings.Join(s.Kept, ", ")
+		warnS := styleWarn
+		rows = append(rows, kvRow{Key: "kept", Value: keptVal, Style: &warnS})
+	} else {
+		rows = append(rows, kvRow{Key: "kept", Value: keptVal})
+	}
+	printKV(rows)
 }
 
 func runUninstall() uninstallSummary {
