@@ -71,10 +71,14 @@ func printListHuman(res scheduler.ScanResult) error {
 		fmt.Println("(no agents)")
 	} else {
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tSECTION\tSCHEDULE\tDESCRIPTION")
+		fmt.Fprintln(w, "ID\tSECTION\tSCHEDULE\tWARNINGS\tDESCRIPTION")
 		for _, a := range res.Agents {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-				a.ID, a.Section, summarizeSchedule(a.Meta.Schedule), summarizeDescription(a.Meta.Description))
+			warn := "-"
+			if len(a.Warnings) > 0 {
+				warn = strings.Join(a.Warnings, ",")
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+				a.ID, a.Section, summarizeSchedule(a.Meta.Schedule), warn, summarizeDescription(a.Meta.Description))
 		}
 		w.Flush()
 	}

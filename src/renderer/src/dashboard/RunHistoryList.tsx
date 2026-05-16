@@ -76,9 +76,7 @@ export function RunHistoryList({ agentId }: Props): JSX.Element {
       sortAt: m.expectedAt,
       expectedAt: m.expectedAt
     }))
-    return [...runItems, ...missedItems].sort((a, b) =>
-      b.sortAt.localeCompare(a.sortAt)
-    )
+    return [...runItems, ...missedItems].sort((a, b) => b.sortAt.localeCompare(a.sortAt))
   }, [runs, missedForAgent])
 
   const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
@@ -122,9 +120,7 @@ export function RunHistoryList({ agentId }: Props): JSX.Element {
           {missedForAgent.length > 0 && (
             <>
               <span className="px-1.5 text-[var(--color-rule-bright)]">·</span>
-              <span className="text-[var(--color-hot)]">
-                {missedForAgent.length} missed
-              </span>
+              <span className="text-[var(--color-hot)]">{missedForAgent.length} missed</span>
             </>
           )}
         </span>

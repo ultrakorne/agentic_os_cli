@@ -39,9 +39,9 @@ describe('compileToCron', () => {
     })
 
     it('Sun only at 23:30', () => {
-      expect(
-        compileToCron({ kind: 'daily', days: ['sun'], hour: 23, minute: 30 })
-      ).toBe('30 23 * * 0')
+      expect(compileToCron({ kind: 'daily', days: ['sun'], hour: 23, minute: 30 })).toBe(
+        '30 23 * * 0'
+      )
     })
 
     it('dedupes and sorts day list', () => {
@@ -56,18 +56,14 @@ describe('compileToCron', () => {
     })
 
     it('rejects empty days', () => {
-      expect(() =>
-        compileToCron({ kind: 'daily', days: [], hour: 8, minute: 0 })
-      ).toThrow(/at least one weekday/)
+      expect(() => compileToCron({ kind: 'daily', days: [], hour: 8, minute: 0 })).toThrow(
+        /at least one weekday/
+      )
     })
 
     it('rejects out-of-range hour and minute', () => {
-      expect(() =>
-        compileToCron({ kind: 'daily', days: ['mon'], hour: 24, minute: 0 })
-      ).toThrow()
-      expect(() =>
-        compileToCron({ kind: 'daily', days: ['mon'], hour: 0, minute: 60 })
-      ).toThrow()
+      expect(() => compileToCron({ kind: 'daily', days: ['mon'], hour: 24, minute: 0 })).toThrow()
+      expect(() => compileToCron({ kind: 'daily', days: ['mon'], hour: 0, minute: 60 })).toThrow()
     })
   })
 })

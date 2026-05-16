@@ -97,12 +97,7 @@ export function AgentCard({
 
       {/* header: status + id + run */}
       <div className="relative flex items-start gap-2.5">
-        <StatusGlyph
-          status={status}
-          scheduled={!!schedule}
-          live={live}
-          missed={missedCount > 0}
-        />
+        <StatusGlyph status={status} scheduled={!!schedule} live={live} missed={missedCount > 0} />
         <span className="min-w-0 flex-1">
           <span
             className={`font-display block truncate text-[13px] font-bold uppercase ${
@@ -147,9 +142,7 @@ export function AgentCard({
       >
         <span
           className={
-            schedule
-              ? 'text-[var(--color-cool)] neon-text-soft'
-              : 'text-[var(--color-fg-faint)]'
+            schedule ? 'text-[var(--color-cool)] neon-text-soft' : 'text-[var(--color-fg-faint)]'
           }
         >
           {describeSchedule(schedule)}
@@ -169,12 +162,7 @@ export function AgentCard({
   )
 }
 
-function pickGlow(
-  status: Status,
-  scheduled: boolean,
-  selected: boolean,
-  live: boolean
-): string {
+function pickGlow(status: Status, scheduled: boolean, selected: boolean, live: boolean): string {
   if (selected) return '--color-hot'
   if (live) return '--color-cool'
   if (status === 'error') return '--color-danger'
@@ -268,9 +256,7 @@ function StatusGlyph({
     <span
       aria-label={scheduled ? 'scheduled' : 'idle'}
       className={`mt-0.5 inline-flex size-4 items-center justify-center text-base ${
-        scheduled
-          ? 'text-[var(--color-cool)] neon-text-soft'
-          : 'text-[var(--color-fg-faint)]'
+        scheduled ? 'text-[var(--color-cool)] neon-text-soft' : 'text-[var(--color-fg-faint)]'
       }`}
     >
       {scheduled ? '◇' : '·'}

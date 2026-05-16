@@ -34,7 +34,10 @@ export function RunRow({
       >
         <StatusGlyph status={run.status} />
         <span className="flex min-w-0 flex-col">
-          <span className="font-display text-[11px] font-bold uppercase text-[var(--color-fg)] tabular" style={{ letterSpacing: '0.14em' }}>
+          <span
+            className="font-display text-[11px] font-bold uppercase text-[var(--color-fg)] tabular"
+            style={{ letterSpacing: '0.14em' }}
+          >
             {formatClock(run.startedAt)}
           </span>
           <span className="text-[10px] text-[var(--color-fg-dim)] tabular">
@@ -118,8 +121,7 @@ function TruncatedOutput({
   onViewFull: () => void
 }): JSX.Element {
   const lines = output.split('\n')
-  const overflows =
-    lines.length > MAX_INLINE_LINES || output.length > MAX_INLINE_CHARS
+  const overflows = lines.length > MAX_INLINE_LINES || output.length > MAX_INLINE_CHARS
   const display = overflows
     ? lines.slice(0, MAX_INLINE_LINES).join('\n').slice(0, MAX_INLINE_CHARS)
     : output

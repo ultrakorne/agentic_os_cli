@@ -40,9 +40,7 @@ export async function resolveAosBin(): Promise<string | null> {
 
 // Runs `aos home` and returns the resolved path on stdout, or null+reason on
 // failure. The CLI exits 1 with a message on stderr when not initialized.
-export async function readAosHome(
-  aosBin: string
-): Promise<{ home: string } | { error: string }> {
+export async function readAosHome(aosBin: string): Promise<{ home: string } | { error: string }> {
   return new Promise((resolve) => {
     const cp = spawn(aosBin, ['home'], { stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''

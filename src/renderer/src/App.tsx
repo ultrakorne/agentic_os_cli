@@ -40,11 +40,7 @@ function App(): JSX.Element {
         agentCount={agents.length}
       />
       <Dashboard />
-      <BottomBar
-        running={stats.running}
-        scheduled={stats.scheduled}
-        lastRun={stats.lastRun}
-      />
+      <BottomBar running={stats.running} scheduled={stats.scheduled} lastRun={stats.lastRun} />
     </div>
   )
 }
@@ -201,10 +197,7 @@ function ThemePicker({
                       : 'text-[var(--color-fg-dim)] hover:text-[var(--color-accent)]'
                   }`}
                 >
-                  <span
-                    className="font-display uppercase"
-                    style={{ letterSpacing: '0.22em' }}
-                  >
+                  <span className="font-display uppercase" style={{ letterSpacing: '0.22em' }}>
                     {t.name}
                   </span>
                   {active ? (
@@ -256,19 +249,13 @@ function BottomBar({
         <span className="font-display text-[var(--color-hot)] neon-text-soft">
           {scheduled.toString().padStart(2, '0')}
         </span>
-        <span
-          className="uppercase text-[var(--color-fg-dim)]"
-          style={{ letterSpacing: '0.22em' }}
-        >
+        <span className="uppercase text-[var(--color-fg-dim)]" style={{ letterSpacing: '0.22em' }}>
           scheduled
         </span>
       </span>
 
       <span className="ml-auto flex items-baseline gap-2 text-[var(--color-fg-faint)] tabular">
-        <span
-          className="uppercase"
-          style={{ letterSpacing: '0.22em' }}
-        >
+        <span className="uppercase" style={{ letterSpacing: '0.22em' }}>
           last run
         </span>
         <span className="text-[var(--color-fg-dim)]">

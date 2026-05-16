@@ -3,7 +3,6 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { AppService } from './service'
-import { AgentMetaStore } from './scheduler/agent-meta-store'
 import { RunsStore } from './scheduler/runs-store'
 import { MissesStore } from './scheduler/misses-store'
 import { broadcastChange, registerIpc, type ServiceHandle } from './ipc'
@@ -73,8 +72,7 @@ async function initService(themeStore: ThemeStore): Promise<ServiceHandle> {
       aosBin: null,
       aosHome: null,
       lastRefresh: null,
-      lastRefreshError:
-        'aos not found on PATH — run `scripts/install.sh` in agentic_os_cli/'
+      lastRefreshError: 'aos not found on PATH — run `scripts/install.sh` in agentic_os_cli/'
     })
   }
   const homeRes = await readAosHome(aosBin)
@@ -89,14 +87,12 @@ async function initService(themeStore: ThemeStore): Promise<ServiceHandle> {
   }
 
   const aosHome = homeRes.home
-  const meta = new AgentMetaStore()
   const runs = new RunsStore(join(aosHome, 'runs'))
   const misses = new MissesStore(join(aosHome, 'misses'))
 
   service = new AppService({
     aosBin,
     aosHome,
-    meta,
     runs,
     misses,
     onChange: () => broadcastChange()

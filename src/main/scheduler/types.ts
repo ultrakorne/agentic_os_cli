@@ -1,7 +1,6 @@
 export type {
   Agent,
   AgentMeta,
-  AgentScanIssue,
   JobRun,
   JobRunStatus,
   JobRunTrigger,

@@ -27,9 +27,7 @@ export function MissedRunsBanner(): JSX.Element | null {
         setLaunchError(`${jobId}: ${res.error ?? 'run failed to launch'}`)
       }
     } catch (err) {
-      setLaunchError(
-        `${jobId}: ${err instanceof Error ? err.message : 'run failed to launch'}`
-      )
+      setLaunchError(`${jobId}: ${err instanceof Error ? err.message : 'run failed to launch'}`)
     }
   }
 

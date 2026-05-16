@@ -10,7 +10,6 @@ export const IPC = {
   agentsRevealDir: 'agents:reveal-dir',
   agentsSetSchedule: 'agents:set-schedule',
   agentsSetDescription: 'agents:set-description',
-  agentsListIssues: 'agents:list-issues',
   schedListRuns: 'scheduler:list-runs',
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
@@ -41,33 +40,22 @@ export function registerIpc(handle: ServiceHandle): void {
   const { service, themeStore } = handle
 
   ipcMain.handle(IPC.agentsList, () => service?.listAgents() ?? [])
-  ipcMain.handle(IPC.agentsListIssues, () => service?.listScanIssues() ?? [])
   ipcMain.handle(IPC.agentsRevealDir, () => {
     if (!service) return ''
     return shell.openPath(join(service.aosHome, 'agents'))
   })
-  ipcMain.handle(
-    IPC.agentsSetSchedule,
-    (_e, agentId: string, spec: ScheduleSpec | null) => {
-      if (!service) throw new Error(NO_CLI)
-      return service.setSchedule(agentId, spec)
-    }
-  )
-  ipcMain.handle(
-    IPC.agentsSetDescription,
-    (_e, agentId: string, description: string) => {
-      if (!service) throw new Error(NO_CLI)
-      return service.setDescription(agentId, description)
-    }
-  )
+  ipcMain.handle(IPC.agentsSetSchedule, (_e, agentId: string, spec: ScheduleSpec | null) => {
+    if (!service) throw new Error(NO_CLI)
+    return service.setSchedule(agentId, spec)
+  })
+  ipcMain.handle(IPC.agentsSetDescription, (_e, agentId: string, description: string) => {
+    if (!service) throw new Error(NO_CLI)
+    return service.setDescription(agentId, description)
+  })
 
-  ipcMain.handle(IPC.schedListRuns, (_e, jobId?: string) =>
-    service?.listRuns(jobId) ?? []
-  )
+  ipcMain.handle(IPC.schedListRuns, (_e, jobId?: string) => service?.listRuns(jobId) ?? [])
   ipcMain.handle(IPC.schedListMissed, () => service?.listMissed() ?? [])
-  ipcMain.handle(IPC.schedReadOutput, (_e, runId: string) =>
-    service?.readOutput(runId) ?? null
-  )
+  ipcMain.handle(IPC.schedReadOutput, (_e, runId: string) => service?.readOutput(runId) ?? null)
   ipcMain.handle(IPC.schedRunNow, (_e, agentId: string) => {
     if (!service) throw new Error(NO_CLI)
     return service.runManually(agentId)

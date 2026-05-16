@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -76,6 +77,9 @@ func printAgentHuman(rec map[string]any) error {
 	row("id", rec["id"])
 	row("section", rec["section"])
 	row("script", rec["scriptPath"])
+	if warns, ok := rec["warnings"].([]string); ok && len(warns) > 0 {
+		row("warnings", strings.Join(warns, ","))
+	}
 	if sched, ok := rec["schedule"].(*scheduler.ScheduleSpec); ok && sched != nil {
 		row("schedule", summarizeSchedule(sched))
 		if cronExpr, ok := rec["cron"].(string); ok {

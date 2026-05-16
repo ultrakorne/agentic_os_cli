@@ -206,9 +206,7 @@ export function ScheduleEditor({ agent, embedded = false }: Props): JSX.Element 
               {spec ? (nextIso ? formatClock(nextIso) : '…') : 'pick a day'}
             </span>
             {spec && nextIso && (
-              <span className="tabular text-[var(--color-fg-dim)]">
-                {relativeFromNow(nextIso)}
-              </span>
+              <span className="tabular text-[var(--color-fg-dim)]">{relativeFromNow(nextIso)}</span>
             )}
           </div>
         </div>

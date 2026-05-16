@@ -15,9 +15,11 @@ A view over filesystem state: the `aos` CLI installs `wrapper.sh` and a managed 
 ## Code layout
 
 - `src/main/` — Electron main:
-  - `service.ts` — thin AppService: lists agents/runs/missed, writes meta sidecars, spawns `aos refresh`, spawns `wrapper.sh` for manual runs
+  - `service.ts` — thin AppService: caches the agent list, shells out to `aos list/schedule/describe/refresh` for every mutation, spawns `wrapper.sh` for manual runs
   - `cli.ts` — locates the `aos` binary on PATH and calls `aos home`
-  - `agents/`, `scheduler/` (read-side helpers + meta-store), `theme/`, `ipc.ts`
+  - `agents/agent-list.ts` — parses `aos list --json` into the renderer's `Agent[]`; also formats `aos schedule` flags
+  - `scheduler/` — read-side helpers (runs/misses watchers, croner-based `nextRun`)
+  - `theme/`, `ipc.ts`
 - `src/preload/` — context bridge
 - `src/renderer/src/` — React 19 + Zustand + Tailwind 4 dashboard
 - `src/shared/` — types shared across processes
@@ -34,10 +36,10 @@ pnpm lint
 
 ## Conventions
 
-- The app is a view. Anything that affects the user's system (cron, wrapper install, log trimming) lives in the `aos` CLI, not the renderer.
+- The app is a view. Anything that affects the user's system (cron, wrapper install, log trimming, sidecar writes, scanning) lives in the `aos` CLI, not the renderer.
 - If the user doesn't have `aos` on PATH, the dashboard renders a blocking banner and does nothing else.
 - Filesystem first: new state is JSON under `<aos_home>/`, mutated by small focused code, rendered in the view. Reach for renderer logic only for genuinely interactive bits.
-- Meta-sidecar writes (schedule, description) happen directly from the renderer, but the main process auto-invokes `aos refresh` afterwards so cron stays consistent.
+- Schedule and description edits shell out to `aos schedule` / `aos describe`. The CLI writes the meta sidecar **and** reconciles cron; the main process re-pulls `aos list --json` to refresh the cache. There is no TS-side scanner or meta-store anymore.
 - No hardcoded colors outside fallbacks — read from the active Omarchy theme.
 - Terse labels, shell verbs, no emojis, no exclamation points.
 

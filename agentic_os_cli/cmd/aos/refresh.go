@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,15 @@ var refreshCmd = &cobra.Command{
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
+		}
+		if JSONOutput() {
+			buf, jerr := json.MarshalIndent(s, "", "  ")
+			if jerr != nil {
+				fmt.Fprintln(os.Stderr, jerr)
+				os.Exit(1)
+			}
+			fmt.Println(string(buf))
+			return
 		}
 		fmt.Println(s.OneLine())
 	},
@@ -98,6 +108,14 @@ func RunRefresh() (RefreshSummary, error) {
 	entries := make([]crontab.Entry, 0)
 	for _, a := range scan.Agents {
 		if a.Meta.Schedule == nil {
+			continue
+		}
+		if len(a.Warnings) > 0 {
+			// A warned agent (e.g. not-executable) shouldn't enter the
+			// managed crontab block — cron would fire a script that can't
+			// run. Surface the count so a human reading the summary can see
+			// why a scheduled agent isn't showing up under cron.
+			sum.Issues++
 			continue
 		}
 		expr, err := scheduler.CompileToCron(*a.Meta.Schedule)

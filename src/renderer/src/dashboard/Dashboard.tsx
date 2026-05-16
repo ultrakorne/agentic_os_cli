@@ -77,9 +77,7 @@ export function Dashboard(): JSX.Element {
                       recentRun={lastRunByJob.get(agent.id)}
                       missedCount={missedByAgent.get(agent.id) ?? 0}
                       selected={selectedId === agent.id}
-                      onSelect={() =>
-                        setSelectedId((cur) => (cur === agent.id ? null : agent.id))
-                      }
+                      onSelect={() => setSelectedId((cur) => (cur === agent.id ? null : agent.id))}
                     />
                   ))}
                 </div>
@@ -157,10 +155,7 @@ function EditorOverlay({
       className="bg-overlay fixed inset-0 z-50 flex justify-center items-start overflow-y-auto px-4 pb-16 pt-20 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-[min(96vw,1300px)]"
-      >
+      <div onClick={(e) => e.stopPropagation()} className="w-[min(96vw,1300px)]">
         {children}
       </div>
     </div>

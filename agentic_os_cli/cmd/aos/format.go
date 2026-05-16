@@ -34,8 +34,14 @@ func agentRecord(a scheduler.Agent, meta scheduler.AgentMeta) map[string]any {
 	if meta.ScheduledAt != "" {
 		rec["scheduledAt"] = meta.ScheduledAt
 	}
+	if meta.Title != "" {
+		rec["title"] = meta.Title
+	}
 	if meta.Description != "" {
 		rec["description"] = meta.Description
+	}
+	if len(a.Warnings) > 0 {
+		rec["warnings"] = a.Warnings
 	}
 	return rec
 }

@@ -1,29 +1,21 @@
 import { spawn } from 'child_process'
-import { promises as fs } from 'fs'
-import { join } from 'path'
 import { Cron } from 'croner'
 import type {
   Agent,
-  AgentScanIssue,
   JobRun,
   MissedRun,
   RefreshSummary,
   ScheduleSpec,
   SystemStatus
 } from '../shared/scheduler'
-import { AgentMetaStore } from './scheduler/agent-meta-store'
 import { RunsStore } from './scheduler/runs-store'
 import { MissesStore } from './scheduler/misses-store'
 import { compileToCron } from './scheduler/spec'
-import {
-  scanScripts,
-  findScanIssues,
-  type AgentEntry
-} from './agents/scanner'
+import { parseAgentList, scheduleToArgs } from './agents/agent-list'
 
 // One-shot wait for a child process's stdout/stderr to drain and the exit code
 // to be available. Returns ({code, stdout, stderr}); never throws.
-function execCapture(
+export function execCapture(
   bin: string,
   args: string[]
 ): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -46,53 +38,21 @@ function execCapture(
   })
 }
 
-// Parses the single-line summary printed by `aos refresh`, of the form
-//   aos refresh agents=N scheduled=N issues=N cron=X wrapper=X python3=X daemon=X log=X
-// Returns null if the line doesn't match the expected shape.
-export function parseRefreshSummary(line: string): RefreshSummary | null {
-  const trimmed = line.trim()
-  if (!trimmed.startsWith('aos refresh ')) return null
-  const fields: Record<string, string> = {}
-  for (const part of trimmed.slice('aos refresh '.length).split(/\s+/)) {
-    const eq = part.indexOf('=')
-    if (eq < 0) continue
-    fields[part.slice(0, eq)] = part.slice(eq + 1)
-  }
-  const num = (k: string): number => {
-    const v = parseInt(fields[k] ?? '', 10)
-    return Number.isFinite(v) ? v : 0
-  }
-  return {
-    agents: num('agents'),
-    scheduled: num('scheduled'),
-    issues: num('issues'),
-    cron: fields.cron ?? 'unknown',
-    wrapper: fields.wrapper ?? 'unknown',
-    python3: fields.python3 ?? 'unknown',
-    daemon: fields.daemon ?? 'unknown',
-    log: fields.log ?? 'unknown'
-  }
-}
-
-const newId = (): string =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-
 export type AppServiceOpts = {
   aosBin: string
   aosHome: string
-  meta: AgentMetaStore
   runs: RunsStore
   misses: MissesStore
   onChange?: () => void
 }
 
-// Thin service layer for the renderer. Reads agents/runs/misses from the
-// filesystem, writes meta sidecars, and delegates anything that mutates cron
-// (or anything else system-wide) to the `aos` CLI by spawning it. The CLI
-// owns the misses/ directory — the dashboard never re-derives it.
+// Thin service layer for the renderer. Holds an in-memory cache of the
+// agents list (re-fetched from `aos list --json` whenever something
+// changes) and proxies every sidecar write through the `aos` CLI. This is
+// the "view" half of the system; the CLI owns the agents tree, the meta
+// sidecars, the managed crontab block, and the misses dir.
 export class AppService {
-  private entries: AgentEntry[] = []
-  private scanIssues: AgentScanIssue[] = []
+  private agents: Agent[] = []
   private lastRefresh: RefreshSummary | null = null
   private lastRefreshError: string | null = null
 
@@ -102,13 +62,9 @@ export class AppService {
     return this.opts.aosHome
   }
 
-  get wrapperPath(): string {
-    return join(this.opts.aosHome, 'wrapper.sh')
-  }
-
   async start(): Promise<void> {
     await Promise.all([this.opts.runs.load(), this.opts.misses.load()])
-    await this.refreshScripts()
+    await this.refreshAgents()
     this.opts.runs.startWatching(() => {
       this.opts.onChange?.()
     })
@@ -122,25 +78,24 @@ export class AppService {
     this.opts.misses.stopWatching()
   }
 
-  async refreshScripts(): Promise<Agent[]> {
-    const agentsDir = join(this.opts.aosHome, 'agents')
-    const [entries, issues] = await Promise.all([
-      scanScripts(agentsDir),
-      findScanIssues(agentsDir)
-    ])
-    this.entries = entries
-    this.scanIssues = issues
-    return this.listAgents()
+  // Re-fetch agents from the CLI. The CLI scanner is the single source of
+  // truth — section detection, executable check, sidecar fold-in, and the
+  // not-executable warning all live in `aos list --json`.
+  private async refreshAgents(): Promise<void> {
+    const res = await execCapture(this.opts.aosBin, ['list', '--json'])
+    if (res.code !== 0) {
+      this.lastRefreshError = res.stderr.trim() || `aos list exited ${res.code}`
+      return
+    }
+    try {
+      this.agents = parseAgentList(res.stdout)
+    } catch (err) {
+      this.lastRefreshError = `aos list parse: ${(err as Error).message}`
+    }
   }
 
   listAgents(): Agent[] {
-    return this.entries
-      .map((e) => entryToAgent(e))
-      .sort((a, b) => a.id.localeCompare(b.id))
-  }
-
-  listScanIssues(): AgentScanIssue[] {
-    return this.scanIssues.map((i) => ({ ...i }))
+    return this.agents.map((a) => ({ ...a, warnings: [...a.warnings] }))
   }
 
   listMissed(): MissedRun[] {
@@ -169,120 +124,68 @@ export class AppService {
     }
   }
 
-  // Re-scan agents from disk AND ask the CLI to reconcile cron. The CLI is
-  // the source of truth for everything in the user's crontab; the renderer
-  // only watches the resulting summary line so it can flag missing wrapper /
-  // python3 / cron daemon.
+  // Ask the CLI to rescan and reconcile cron, then re-pull the agent list.
   async refresh(): Promise<RefreshSummary | null> {
-    await this.refreshScripts()
-    const res = await execCapture(this.opts.aosBin, ['refresh'])
-    const line = lastNonEmptyLine(res.stdout)
-    if (res.code === 0 && line) {
-      const parsed = parseRefreshSummary(line)
-      if (parsed) {
-        this.lastRefresh = parsed
+    const res = await execCapture(this.opts.aosBin, ['refresh', '--json'])
+    if (res.code === 0 && res.stdout.trim()) {
+      try {
+        this.lastRefresh = JSON.parse(res.stdout) as RefreshSummary
         this.lastRefreshError = null
-        this.opts.onChange?.()
-        return parsed
+      } catch {
+        this.lastRefreshError = `unexpected aos refresh output: ${res.stdout.trim().slice(0, 200)}`
       }
-      this.lastRefreshError = `unexpected aos refresh output: ${line}`
     } else {
-      this.lastRefreshError =
-        res.stderr.trim() || `aos refresh exited ${res.code}`
+      this.lastRefreshError = res.stderr.trim() || `aos refresh exited ${res.code}`
     }
+    await this.refreshAgents()
     this.opts.onChange?.()
     return this.lastRefresh
   }
 
   async setSchedule(agentId: string, schedule: ScheduleSpec | null): Promise<void> {
-    const entry = this.entries.find((e) => e.id === agentId)
-    if (!entry) throw new Error(`unknown agent "${agentId}"`)
-    entry.meta = await this.opts.meta.setSchedule(entry.metaPath, schedule)
-    // Schedule changed → cron needs to be reconciled and misses recomputed.
-    // Fire-and-forget; aos refresh rewrites <aos_home>/misses, which the
-    // MissesStore picks up via fs.watch.
-    void this.refresh()
+    const args = ['schedule', agentId, '--json', ...scheduleToArgs(schedule)]
+    const res = await execCapture(this.opts.aosBin, args)
+    if (res.code !== 0) {
+      throw new Error(res.stderr.trim() || `aos schedule exited ${res.code}`)
+    }
+    // The CLI auto-refreshes cron and embeds the resulting summary, so we
+    // pluck it here instead of spawning another `aos refresh`. JSON parse
+    // failure isn't fatal — the write itself already succeeded.
+    try {
+      const parsed = JSON.parse(res.stdout) as {
+        refresh?: RefreshSummary | { error: string }
+      }
+      if (parsed.refresh && 'error' in parsed.refresh) {
+        this.lastRefreshError = parsed.refresh.error
+      } else if (parsed.refresh) {
+        this.lastRefresh = parsed.refresh
+        this.lastRefreshError = null
+      }
+    } catch {
+      /* keep prior summary */
+    }
+    await this.refreshAgents()
     this.opts.onChange?.()
   }
 
   async setDescription(agentId: string, description: string): Promise<void> {
-    const entry = this.entries.find((e) => e.id === agentId)
-    if (!entry) throw new Error(`unknown agent "${agentId}"`)
-    entry.meta = await this.opts.meta.setDescription(entry.metaPath, description)
+    const res = await execCapture(this.opts.aosBin, ['describe', agentId, description, '--json'])
+    if (res.code !== 0) {
+      throw new Error(res.stderr.trim() || `aos describe exited ${res.code}`)
+    }
+    await this.refreshAgents()
     this.opts.onChange?.()
   }
 
+  // Manual runs are owned by `aos run`: it picks the run id, spawns the
+  // wrapper detached, and prints the JobRun stub. Keeping the cron/manual
+  // invocation forms in one place stops them from drifting when the wrapper
+  // grows new argv or env.
   async runManually(agentId: string): Promise<JobRun> {
-    const stub: JobRun = {
-      id: newId(),
-      jobId: agentId,
-      scheduleId: null,
-      trigger: 'manual',
-      startedAt: new Date().toISOString(),
-      endedAt: null,
-      status: 'running',
-      output: '',
-      error: null,
-      exitCode: null,
-      outputPath: null
+    const res = await execCapture(this.opts.aosBin, ['run', agentId, '--json'])
+    if (res.code !== 0) {
+      throw new Error(res.stderr.trim() || `aos run exited ${res.code}`)
     }
-
-    const entry = this.entries.find((e) => e.id === agentId)
-    if (!entry) {
-      stub.status = 'error'
-      stub.error = `no script found for agent "${agentId}"`
-      stub.endedAt = new Date().toISOString()
-      return stub
-    }
-    try {
-      await fs.access(this.wrapperPath)
-    } catch {
-      stub.status = 'error'
-      stub.error = `${this.wrapperPath} missing — run \`aos init <path>\``
-      stub.endedAt = new Date().toISOString()
-      return stub
-    }
-
-    const cp = spawn(
-      this.wrapperPath,
-      [this.opts.aosHome, '', agentId, entry.scriptPath, stub.id],
-      {
-        detached: true,
-        stdio: 'ignore',
-        env: { ...process.env, AGENTIC_OS_TRIGGER: 'manual' }
-      }
-    )
-    cp.unref()
-    return stub
+    return JSON.parse(res.stdout) as JobRun
   }
-
-}
-
-function entryToAgent(e: AgentEntry): Agent {
-  return {
-    id: e.id,
-    title: e.meta.title ?? humanize(e.id),
-    description: e.meta.description ?? '',
-    section: e.section,
-    scriptPath: e.scriptPath,
-    schedule: e.meta.schedule,
-    scheduledAt: e.meta.scheduledAt,
-    scheduled: !!e.meta.schedule
-  }
-}
-
-function humanize(id: string): string {
-  return id
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .trim()
-}
-
-function lastNonEmptyLine(text: string): string | null {
-  const lines = text.split('\n')
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i].trim()
-    if (l) return l
-  }
-  return null
 }

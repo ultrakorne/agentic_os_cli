@@ -8,7 +8,7 @@ type Issue = {
 
 export function SystemBanner(): JSX.Element | null {
   const status = useApp((s) => s.status)
-  const scanIssues = useApp((s) => s.scanIssues)
+  const agents = useApp((s) => s.agents)
   const rescan = useApp((s) => s.rescanAgents)
 
   if (!status) return null
@@ -59,11 +59,11 @@ export function SystemBanner(): JSX.Element | null {
       })
     }
   }
-  for (const si of scanIssues) {
-    if (si.kind === 'not-executable') {
+  for (const agent of agents) {
+    if (agent.warnings.includes('not-executable')) {
       issues.push({
         tone: 'warn',
-        text: `${shortPath(si.path)} not executable — chmod +x to enable`
+        text: `${shortPath(agent.scriptPath)} not executable — chmod +x to enable`
       })
     }
   }
@@ -83,10 +83,7 @@ export function SystemBanner(): JSX.Element | null {
             className={`bg-card flex items-center gap-3 border ${palette} px-3 py-2 text-[11px]`}
           >
             <span aria-hidden>{issue.tone === 'danger' ? '▲' : '◇'}</span>
-            <span
-              className="flex-1 font-display uppercase"
-              style={{ letterSpacing: '0.18em' }}
-            >
+            <span className="flex-1 font-display uppercase" style={{ letterSpacing: '0.18em' }}>
               {issue.text}
             </span>
             {i === issues.length - 1 && (

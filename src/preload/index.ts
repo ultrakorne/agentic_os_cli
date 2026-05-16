@@ -2,7 +2,6 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
   Agent,
-  AgentScanIssue,
   JobRun,
   MissedRun,
   RefreshSummary,
@@ -16,7 +15,6 @@ const C = {
   agentsRevealDir: 'agents:reveal-dir',
   agentsSetSchedule: 'agents:set-schedule',
   agentsSetDescription: 'agents:set-description',
-  agentsListIssues: 'agents:list-issues',
   schedListRuns: 'scheduler:list-runs',
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
@@ -38,17 +36,14 @@ const api = {
     setSchedule: (agentId: string, spec: ScheduleSpec | null): Promise<void> =>
       ipcRenderer.invoke(C.agentsSetSchedule, agentId, spec),
     setDescription: (agentId: string, description: string): Promise<void> =>
-      ipcRenderer.invoke(C.agentsSetDescription, agentId, description),
-    listIssues: (): Promise<AgentScanIssue[]> => ipcRenderer.invoke(C.agentsListIssues)
+      ipcRenderer.invoke(C.agentsSetDescription, agentId, description)
   },
   scheduler: {
-    listRuns: (jobId?: string): Promise<JobRun[]> =>
-      ipcRenderer.invoke(C.schedListRuns, jobId),
+    listRuns: (jobId?: string): Promise<JobRun[]> => ipcRenderer.invoke(C.schedListRuns, jobId),
     listMissed: (): Promise<MissedRun[]> => ipcRenderer.invoke(C.schedListMissed),
     readOutput: (runId: string): Promise<string | null> =>
       ipcRenderer.invoke(C.schedReadOutput, runId),
-    runNow: (agentId: string): Promise<JobRun> =>
-      ipcRenderer.invoke(C.schedRunNow, agentId),
+    runNow: (agentId: string): Promise<JobRun> => ipcRenderer.invoke(C.schedRunNow, agentId),
     nextRun: (spec: ScheduleSpec): Promise<string | null> =>
       ipcRenderer.invoke(C.schedNextRun, spec),
     refresh: (): Promise<RefreshSummary | null> => ipcRenderer.invoke(C.schedRefresh),

@@ -110,9 +110,7 @@ export class RunsStore {
 
   private trimCache(): void {
     if (this.cache.size <= this.cacheLimit) return
-    const sorted = [...this.cache.values()].sort((a, b) =>
-      a.startedAt.localeCompare(b.startedAt)
-    )
+    const sorted = [...this.cache.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt))
     const toRemove = sorted.length - this.cacheLimit
     for (let i = 0; i < toRemove; i++) this.cache.delete(sorted[i].id)
   }

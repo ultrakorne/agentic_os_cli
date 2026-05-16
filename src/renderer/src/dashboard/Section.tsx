@@ -7,12 +7,7 @@ type Props = {
   children: ReactNode
 }
 
-export function Section({
-  title,
-  agentCount,
-  scheduledCount,
-  children
-}: Props): JSX.Element {
+export function Section({ title, agentCount, scheduledCount, children }: Props): JSX.Element {
   return (
     <section className="space-y-4">
       <header className="flex items-end gap-4 pb-2">
@@ -30,10 +25,7 @@ export function Section({
           >
             {agentCount.toString().padStart(2, '0')}
           </span>
-          <span
-            className="text-[var(--color-fg-faint)]"
-            style={{ letterSpacing: '0.22em' }}
-          >
+          <span className="text-[var(--color-fg-faint)]" style={{ letterSpacing: '0.22em' }}>
             agent{agentCount === 1 ? '' : 's'}
           </span>
           {scheduledCount > 0 && (
@@ -45,10 +37,7 @@ export function Section({
               >
                 {scheduledCount.toString().padStart(2, '0')}
               </span>
-              <span
-                className="text-[var(--color-fg-faint)]"
-                style={{ letterSpacing: '0.22em' }}
-              >
+              <span className="text-[var(--color-fg-faint)]" style={{ letterSpacing: '0.22em' }}>
                 scheduled
               </span>
             </>

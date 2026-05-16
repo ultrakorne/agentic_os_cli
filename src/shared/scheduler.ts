@@ -37,16 +37,15 @@ export type Agent = {
   schedule?: ScheduleSpec
   scheduledAt?: string
   scheduled: boolean
+  // Per-agent problems surfaced by the CLI scanner (e.g. "not-executable").
+  // Empty when the script is fine to run. The dashboard renders these on the
+  // card and the cron block omits warned agents on the next refresh.
+  warnings: string[]
 }
 
 export type MissedRun = {
   agentId: string
   expectedAt: string
-}
-
-export type AgentScanIssue = {
-  kind: 'not-executable'
-  path: string
 }
 
 // One-line summary of an `aos refresh` invocation, with each key=value field
