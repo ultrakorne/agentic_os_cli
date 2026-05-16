@@ -3,8 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -18,7 +18,6 @@ import (
 var (
 	runsAgentID string
 	runsLimit   int
-	runsShowOut bool
 )
 
 var runsCmd = &cobra.Command{
@@ -26,9 +25,8 @@ var runsCmd = &cobra.Command{
 	Short: "List recent runs, or show one by id",
 	Long: `Without args: print recent runs sorted by start time, most recent first.
 
-With one positional run id: print that run's record (use --json for the full
-JobRun shape). Add --output to dump the .out file's contents instead of the
-record, so you can pipe it: ` + "`aos runs <run-id> --output | less`" + `.
+With one positional run id: print that run's record, including the captured
+.out contents inline (also surfaced in the --json payload's "output" field).
 
 Runs are read from <aos_home>/runs/<run-id>.{json,out}; the wrapper writes
 them, this command only reads.`,
@@ -53,28 +51,33 @@ func runRunsCmd(cmd *cobra.Command, args []string) error {
 }
 
 func listAllRuns(runsDir string) error {
-	runs, err := scheduler.ReadRuns(runsDir, runsAgentID, runsLimit)
+	// Pull the full filtered set so the human view can report
+	// "shown of total"; the JSON branch still honors --limit to keep the
+	// existing contract with scripted consumers.
+	all, err := scheduler.ReadRuns(runsDir, runsAgentID, 0)
 	if err != nil {
 		return fmt.Errorf("read runs: %w", err)
 	}
-	if JSONOutput() {
-		return printJSON(map[string]any{"runs": runs})
+	shown := all
+	if runsLimit > 0 && len(shown) > runsLimit {
+		shown = shown[:runsLimit]
 	}
-	return printRunsHuman(runs)
+	if JSONOutput() {
+		return printJSON(map[string]any{"runs": shown})
+	}
+	return printRunsHuman(shown, len(all))
 }
 
 func showOneRun(runsDir, runID string) error {
-	if runsShowOut {
-		data, err := scheduler.ReadRunOutput(runsDir, runID)
-		if err != nil {
-			return err
-		}
-		_, err = os.Stdout.Write(data)
-		return err
-	}
 	run, err := scheduler.ReadRun(runsDir, runID)
 	if err != nil {
 		return err
+	}
+	// The wrapper writes the captured stdout/stderr to a sibling .out file,
+	// not into the .json record. Merge it here so both human and JSON consumers
+	// see the content without an extra flag.
+	if out, err := scheduler.ReadRunOutput(runsDir, runID); err == nil && len(out) > 0 {
+		run.Output = string(out)
 	}
 	if JSONOutput() {
 		return printJSON(run)
@@ -82,20 +85,21 @@ func showOneRun(runsDir, runID string) error {
 	return printOneRunHuman(run)
 }
 
-func printRunsHuman(runs []scheduler.JobRun) error {
-	if len(runs) == 0 {
+func printRunsHuman(runs []scheduler.JobRun, total int) error {
+	if total == 0 {
 		fmt.Println(styleMuted.Render("(no runs)"))
 		return nil
 	}
+	fmt.Println(styleMuted.Render(runsCountSummary(len(runs), total, runsAgentID)))
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
 		rows = append(rows, []string{
 			r.ID, r.JobID, string(r.Status), r.Trigger,
-			formatStartedAt(r.StartedAt), elapsedString(r), exitString(r),
+			formatStartedAt(r.StartedAt), elapsedString(r),
 		})
 	}
 	t := newTable(
-		[]string{"RUN-ID", "AGENT", "STATUS", "TRIGGER", "STARTED", "ELAPSED", "EXIT"},
+		[]string{"RUN-ID", "AGENT", "STATUS", "TRIGGER", "STARTED", "ELAPSED"},
 		rows,
 	).StyleFunc(func(row, col int) lipgloss.Style {
 		if row == table.HeaderRow {
@@ -110,6 +114,24 @@ func printRunsHuman(runs []scheduler.JobRun) error {
 	})
 	fmt.Println(t)
 	return nil
+}
+
+// runsCountSummary builds the muted "showing N of M runs" line that sits above
+// the listing table, so the user can tell at a glance whether --limit is
+// hiding records.
+func runsCountSummary(shown, total int, agentID string) string {
+	suffix := ""
+	if agentID != "" {
+		suffix = " for agent " + agentID
+	}
+	if shown < total {
+		return fmt.Sprintf("showing %d of %d runs%s", shown, total, suffix)
+	}
+	noun := "runs"
+	if total == 1 {
+		noun = "run"
+	}
+	return fmt.Sprintf("showing %d %s%s", total, noun, suffix)
 }
 
 func printOneRunHuman(r scheduler.JobRun) error {
@@ -136,6 +158,17 @@ func printOneRunHuman(r scheduler.JobRun) error {
 		rows = append(rows, kvRow{Key: "error", Value: *r.Error, Style: &errS})
 	}
 	printKV(rows)
+	// Captured stdout/stderr lives in the .out file (loaded into r.Output by
+	// showOneRun). Render it as a labeled block below the kv pairs so
+	// multi-line content doesn't break the right-aligned key column.
+	if r.Output != "" {
+		fmt.Println()
+		fmt.Println(styleLabel.Render("output"))
+		fmt.Print(r.Output)
+		if !strings.HasSuffix(r.Output, "\n") {
+			fmt.Println()
+		}
+	}
 	return nil
 }
 
@@ -170,7 +203,6 @@ func exitString(r scheduler.JobRun) string {
 
 func init() {
 	runsCmd.Flags().StringVar(&runsAgentID, "agent", "", "list: filter to runs of this agent id")
-	runsCmd.Flags().IntVar(&runsLimit, "limit", 100, "list: cap result size (0 = no limit)")
-	runsCmd.Flags().BoolVar(&runsShowOut, "output", false, "single-run: dump the .out file contents instead of the record")
+	runsCmd.Flags().IntVar(&runsLimit, "limit", 25, "list: cap result size (0 = no limit)")
 	rootCmd.AddCommand(runsCmd)
 }

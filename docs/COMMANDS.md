@@ -26,7 +26,7 @@ both surfaces consistent: every `--json` branch funnels through `printJSON`
 | [`aos describe <id> [text]`](#aos-describe) | Show one agent's full record; optionally rewrite its description |
 | [`aos schedule <id> ...`](#aos-schedule) | Set or clear an agent's schedule; auto-refreshes cron |
 | [`aos run <id>`](#aos-run) | Fire a manual run; prints the `JobRun` stub (optional `--wait` blocks until done and prints `.out`) |
-| [`aos runs [run-id]`](#aos-runs) | List recent runs, or show one by id (with `--output` to dump the .out) |
+| [`aos runs [run-id]`](#aos-runs) | List recent runs, or show one by id (single-run prints the captured .out inline) |
 | [`aos uninstall`](#aos-uninstall) | Remove wrapper, managed crontab block, and config |
 
 ---
@@ -374,11 +374,10 @@ until the wrapper writes a terminal record (`success` / `error`).
 ```
 aos runs                            # list recent runs, newest first
 aos runs --agent <id>               # filter by agent id
-aos runs --limit N                  # cap result size (default 100; 0 = no limit)
+aos runs --limit N                  # cap result size (default 25; 0 = no limit)
 aos runs --json
-aos runs <run-id>                   # show one run's record
+aos runs <run-id>                   # show one run's record + captured .out
 aos runs <run-id> --json
-aos runs <run-id> --output          # dump the .out file's contents
 ```
 
 Reads `<aos_home>/runs/<run-id>.{json,out}` and emits the same shape `aos run`
@@ -389,20 +388,24 @@ Malformed `<run-id>.json` files are silently skipped (the wrapper writes
 atomically via `mv`, but a concurrent reader can still hit a partial state in
 rare cases).
 
-**Human list output** (styled lipgloss table; `STATUS` colored per state):
+**Human list output** (styled lipgloss table; `STATUS` colored per state).
+A muted `showing N of M runs` line precedes the table so it's obvious when
+`--limit` is hiding records:
 ```
-╭──────────────────────────────────────┬───────┬─────────┬──────────┬──────────────────────────┬─────────┬──────╮
-│ RUN-ID                               │ AGENT │ STATUS  │ TRIGGER  │ STARTED                  │ ELAPSED │ EXIT │
-├──────────────────────────────────────┼───────┼─────────┼──────────┼──────────────────────────┼─────────┼──────┤
-│ 1778936977-29334-5144069401071970568 │ ping  │ success │ manual   │ 2026-05-16T13:09:37.072Z │ 2.031s  │ 0    │
-│ 1778878800-542403-1886130594         │ ping  │ success │ schedule │ 2026-05-15T21:00:00.090Z │ 2.029s  │ 0    │
-╰──────────────────────────────────────┴───────┴─────────┴──────────┴──────────────────────────┴─────────┴──────╯
+showing 2 of 14 runs
+╭──────────────────────────────────────┬───────┬─────────┬──────────┬─────────────────────┬─────────╮
+│ RUN-ID                               │ AGENT │ STATUS  │ TRIGGER  │ STARTED             │ ELAPSED │
+├──────────────────────────────────────┼───────┼─────────┼──────────┼─────────────────────┼─────────┤
+│ 1778936977-29334-5144069401071970568 │ ping  │ success │ manual   │ 2026-05-16 13:09:37 │ 2.031s  │
+│ 1778878800-542403-1886130594         │ ping  │ success │ schedule │ 2026-05-15 21:00:00 │ 2.029s  │
+╰──────────────────────────────────────┴───────┴─────────┴──────────┴─────────────────────┴─────────╯
 ```
 
 `STATUS` is colored amber (running), green (success), red (error), or
-yellow (missed). `ELAPSED` is `...` while the run is still in flight and
-`—` for `missed` records (they never ran). `EXIT` is `-` until the wrapper
-records an exit code; `—` for `missed`.
+yellow (missed) — the underlying exit code lives in the single-run view, since
+the colored status already conveys the pass/fail signal at list scale.
+`ELAPSED` is `...` while the run is still in flight and `—` for `missed`
+records (they never ran).
 
 ### Missed runs
 
@@ -415,31 +418,35 @@ appear in the timeline alongside real runs. Shape:
 - `startedAt`: the expected slot (RFC3339), not when the miss was recorded
 - `endedAt`, `exitCode`, `outputPath`, `error`: all `null`
 - `trigger`: `"schedule"`
-- `output`: `""` — there is no `.out` file for a missed run; `aos runs <id>
-  --output` prints nothing
+- `output`: `""` — there is no `.out` file for a missed run, so the
+  single-run view renders no `output` section
 
 Only **one** miss record per agent exists on disk at any time. When a newer
 uncovered slot is detected, the previous miss for that agent is deleted and
 replaced — multi-slot outages deliberately collapse to one entry so the
 dashboard's "agents currently behind" banner is one row per agent.
 
-**Human single-run output** (styled key/value block with the run-id as banner):
+**Human single-run output** (styled key/value block with the run-id as banner,
+followed by the captured stdout/stderr from the `.out` file as a labeled
+section):
 ```
 aos runs 1778936977-29334-...
 agent       ping
 status      success
 trigger     manual
-startedAt   2026-05-16T13:09:37.072Z
-endedAt     2026-05-16T13:09:39.103Z
+startedAt   2026-05-16 13:09:37
+endedAt     2026-05-16 13:09:39
 elapsed     2.031s
 exit        0
 outputPath  1778936977-29334-5144069401071970568.out
+
+output
+ping at 2026-05-16T13:09:39Z
 ```
 
-**`--output` form:** dumps the raw `.out` bytes to stdout (no JSON wrapper),
-so it pipes cleanly into `less`, `grep`, etc. Returns empty (no error) when
-the run exists but produced no output yet — running runs lack a `.out` file
-until the wrapper finishes.
+The `output` section is omitted when the run produced no output yet (still
+running, or finished without writing to stdout/stderr). To pipe just the raw
+output, use `aos runs <id> --json | jq -r .output`.
 
 **JSON list output:**
 ```json
@@ -462,7 +469,10 @@ until the wrapper finishes.
 }
 ```
 
-**JSON single-run output:** the inner record only (no `runs` wrapper).
+**JSON single-run output:** the inner record only (no `runs` wrapper), with
+the `output` field populated from the run's `.out` file (empty string when
+nothing was captured). The list output above leaves `output` empty so a
+listing of N runs doesn't balloon with full transcripts.
 
 ## `aos uninstall`
 
