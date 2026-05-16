@@ -40,8 +40,30 @@ the absolute path either way.
 aos init ~/.aos          # create the aos home, write wrapper.sh, sync crontab
 aos refresh              # rescan agents and reconcile the managed crontab block
 aos tick                 # one scheduler tick (cron invokes this automatically)
+aos list                 # list every agent with its schedule and description
+aos describe <id>        # show one agent's full record (or set its description)
+aos schedule <id> ...    # set or clear an agent's schedule, then refresh cron
 aos uninstall            # remove wrapper, managed crontab block, and config
 ```
+
+Add `--json` to any command for a machine-readable payload instead of the
+human one-liner. See [docs/COMMANDS.md](docs/COMMANDS.md) for the full
+reference (every flag, every output shape, the sidecar JSON contract).
+
+### Scheduling syntax
+
+`aos schedule` infers the schedule kind from the flags you pass — there is no
+`--kind` flag.
+
+```
+aos schedule my-agent --every-hours 3 --minute 0          # every 3h on the hour
+aos schedule my-agent --hour 9 --minute 0 --days mon-fri  # weekdays at 09:00
+aos schedule my-agent --hour 9 --minute 0 --days mon,wed  # specific days
+aos schedule my-agent --off                               # clear the schedule
+```
+
+Each schedule write triggers an in-process `aos refresh` so cron stays
+consistent.
 
 ## Where things live
 
