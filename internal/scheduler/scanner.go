@@ -30,6 +30,12 @@ type Agent struct {
 	Section    string
 	MetaPath   string
 	Meta       AgentMeta
+	// Warnings lists per-agent problems that don't disqualify the file from
+	// the agents list but stop it from being safely run as-is — e.g.
+	// "not-executable" for a script missing +x. The renderer surfaces these
+	// on the card; refresh.go skips them when building cron entries so a
+	// broken script never wedges the managed crontab block.
+	Warnings []string
 }
 
 type ScanIssue struct {
@@ -114,8 +120,13 @@ func collectInto(dir, section string, res *ScanResult, seen map[string]string) e
 				continue
 			}
 		}
+		var warnings []string
 		if !isExecutable(full) {
-			continue
+			// File looks like an intended agent (right extension, or no-ext
+			// with shebang) but lacks +x. We still emit a record so the
+			// dashboard can nudge the user; refresh.go won't put a warned
+			// agent into the crontab.
+			warnings = append(warnings, "not-executable")
 		}
 		id := strings.TrimSuffix(name, ext)
 		if strings.HasPrefix(id, "__") {
@@ -138,6 +149,7 @@ func collectInto(dir, section string, res *ScanResult, seen map[string]string) e
 			Section:    section,
 			MetaPath:   metaPath,
 			Meta:       meta,
+			Warnings:   warnings,
 		})
 	}
 	return nil

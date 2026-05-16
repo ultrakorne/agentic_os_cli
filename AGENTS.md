@@ -4,7 +4,7 @@ Go CLI (`aos`) that installs and manages the agentic_os runtime: writes `wrapper
 
 ## Code layout
 
-- `cmd/aos/` — cobra subcommands (`init`, `refresh`, `tick`, `uninstall`) plus shared package-local helpers in `format.go`
+- `cmd/aos/` — cobra subcommands (`init`, `list`, `describe`, `schedule`, `run`, `refresh`, `tick`, `uninstall`) plus shared package-local helpers in `format.go`
 - `internal/config/` — paths, env, and config resolution
 - `internal/resources/` — files embedded into the binary at build time (`wrapper.sh` via `//go:embed`)
 - `internal/runtime/`, `internal/scheduler/`, `internal/crontab/`, `internal/logtrim/` — building blocks the commands wire together
