@@ -14,7 +14,6 @@ export const IPC = {
   schedListMissed: 'scheduler:list-missed',
   schedReadOutput: 'scheduler:read-run-output',
   schedRunNow: 'scheduler:run-now',
-  schedNextRun: 'scheduler:next-run',
   schedRefresh: 'scheduler:refresh',
   schedStatus: 'scheduler:status',
   schedChanged: 'scheduler:changed',
@@ -59,11 +58,6 @@ export function registerIpc(handle: ServiceHandle): void {
   ipcMain.handle(IPC.schedRunNow, (_e, agentId: string) => {
     if (!service) throw new Error(NO_CLI)
     return service.runManually(agentId)
-  })
-  ipcMain.handle(IPC.schedNextRun, (_e, spec: ScheduleSpec) => {
-    if (!service) return null
-    const next = service.nextRunFor(spec)
-    return next ? next.toISOString() : null
   })
   ipcMain.handle(IPC.schedRefresh, () => {
     if (!service) return null

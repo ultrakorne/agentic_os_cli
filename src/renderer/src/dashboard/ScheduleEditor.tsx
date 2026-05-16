@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { Agent, ScheduleSpec, Weekday } from '@shared/scheduler'
-import { formatClock, relativeFromNow } from '../lib/format'
 import { CornerBrackets } from './CornerBrackets'
 import { glowFrame } from './styles'
 
@@ -54,7 +53,6 @@ export function ScheduleEditor({ agent, embedded = false }: Props): JSX.Element 
   const [mode, setModeRaw] = useState<Mode | null>(seed.mode)
   const [hourly, setHourlyRaw] = useState(seed.hourly)
   const [daily, setDailyRaw] = useState(seed.daily)
-  const [nextIso, setNextIso] = useState<string | null>(null)
   const editTokenRef = useRef(0)
   const lastSavedTokenRef = useRef(0)
 
@@ -79,20 +77,6 @@ export function ScheduleEditor({ agent, embedded = false }: Props): JSX.Element 
     if (daily.days.length === 0) return null
     return { kind: 'daily', days: daily.days, hour: daily.hour, minute: daily.minute }
   }, [mode, hourly, daily])
-
-  useEffect(() => {
-    let cancelled = false
-    if (!spec) {
-      setNextIso(null)
-      return
-    }
-    void window.api.scheduler.nextRun(spec).then((iso) => {
-      if (!cancelled) setNextIso(iso)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [spec])
 
   const pendingFlushRef = useRef<{ spec: ScheduleSpec | null } | null>(null)
 
@@ -172,7 +156,7 @@ export function ScheduleEditor({ agent, embedded = false }: Props): JSX.Element 
         </div>
       ) : (
         <div
-          className={`${embedded ? '' : 'mt-4'} grid grid-cols-1 gap-5 md:grid-cols-[auto_1fr_auto] md:items-start`}
+          className={`${embedded ? '' : 'mt-4'} grid grid-cols-1 gap-5 md:grid-cols-[auto_1fr] md:items-start`}
         >
           <ModeToggle mode={mode} onChange={setMode} />
 
@@ -192,21 +176,6 @@ export function ScheduleEditor({ agent, embedded = false }: Props): JSX.Element 
                 onToggleDay={toggleDay}
                 onTime={(hour, minute) => setDaily((d) => ({ ...d, hour, minute }))}
               />
-            )}
-          </div>
-
-          <div className="flex flex-col items-start gap-1 md:items-end">
-            <span
-              className="font-display text-[10px] uppercase text-[var(--color-fg-faint)]"
-              style={{ letterSpacing: '0.24em' }}
-            >
-              next run
-            </span>
-            <span className="font-display text-[15px] font-bold tabular text-[var(--color-cool)] neon-text">
-              {spec ? (nextIso ? formatClock(nextIso) : '…') : 'pick a day'}
-            </span>
-            {spec && nextIso && (
-              <span className="tabular text-[var(--color-fg-dim)]">{relativeFromNow(nextIso)}</span>
             )}
           </div>
         </div>

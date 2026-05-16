@@ -23,7 +23,6 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
-    "croner": "^9.1.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "zustand": "^5.0.8"

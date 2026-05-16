@@ -23,22 +23,7 @@ export function AgentCard({
 }: Props): JSX.Element {
   const schedule = agent.schedule
   const [pendingSince, setPendingSince] = useState<number | null>(null)
-  const [nextRunIso, setNextRunIso] = useState<string | null>(null)
   const [launchError, setLaunchError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    if (!schedule) {
-      setNextRunIso(null)
-      return
-    }
-    void window.api.scheduler.nextRun(schedule).then((iso) => {
-      if (!cancelled) setNextRunIso(iso)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [schedule])
 
   useEffect(() => {
     if (!launchError) return
@@ -135,7 +120,7 @@ export function AgentCard({
         </p>
       )}
 
-      {/* footer: schedule + next */}
+      {/* footer: schedule */}
       <div
         className="relative mt-auto flex items-center gap-2 border-t border-[var(--color-rule)] pt-2 text-[10px] uppercase tabular"
         style={{ letterSpacing: '0.16em' }}
@@ -146,16 +131,6 @@ export function AgentCard({
           }
         >
           {describeSchedule(schedule)}
-        </span>
-        <span className="ml-auto text-[var(--color-fg-dim)]">
-          {nextRunIso ? (
-            <>
-              <span className="text-[var(--color-fg-faint)]">▸</span>{' '}
-              <span>{relativeFromNow(nextRunIso)}</span>
-            </>
-          ) : (
-            <span className="text-[var(--color-fg-faint)]">◇ idle</span>
-          )}
         </span>
       </div>
     </button>
