@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -73,7 +74,7 @@ func printListHuman(res scheduler.ScanResult) error {
 			}
 			rows = append(rows, []string{
 				a.ID,
-				a.Section,
+				displaySection(a.Section),
 				summarizeSchedule(a.Meta.Schedule),
 				warn,
 				summarizeDescription(a.Meta.Description),
@@ -115,6 +116,20 @@ func summarizeSchedule(s *scheduler.ScheduleSpec) string {
 		return fmt.Sprintf("%s %02d:%02d", joinDays(s.Days), s.Hour, s.Minute)
 	}
 	return s.Kind
+}
+
+// displaySection capitalizes the first rune of the section label so the
+// default bucket (hardcoded "Agents") and subdirectory buckets (whose names
+// come straight from the filesystem, typically lowercase) read consistently
+// in the SECTION column. The underlying a.Section — and therefore the JSON
+// contract — is untouched.
+func displaySection(s string) string {
+	if s == "" {
+		return s
+	}
+	runes := []rune(s)
+	runes[0] = unicode.ToUpper(runes[0])
+	return string(runes)
 }
 
 func summarizeDescription(d string) string {
