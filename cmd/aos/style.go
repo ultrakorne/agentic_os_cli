@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/charmbracelet/x/term"
 )
 
@@ -81,15 +81,22 @@ func statusStyle(status string) lipgloss.Style {
 }
 
 // newTable returns a table builder pre-configured with the rounded border,
-// accent border color, and the row-striping StyleFunc used across every
-// listing command. Caller supplies headers + rows and may override the style
-// for individual columns (e.g. status coloring) via SetCellStyleFunc.
+// accent border color, and shared cell padding. Caller supplies headers +
+// rows and may override the style for individual columns (e.g. status
+// coloring) by chaining .StyleFunc() on the returned table.
 //
 // When stdout is a TTY and the table's natural width would overflow the
-// terminal, the table is sized to the terminal width and Wrap is enabled —
-// lipgloss then word-wraps the widest column(s) into multiple lines instead
-// of breaking the border. Tables that fit comfortably are left tight to
-// content (no stretching).
+// terminal, the table is sized to termW and Wrap is enabled so lipgloss
+// word-wraps the widest column(s) into multiple lines instead of breaking
+// the border. Tables that fit comfortably are left tight to content (no
+// stretching).
+//
+// Caveat: lipgloss (through v2.0.3) has a corner case in its resize logic.
+// When the table's natural-without-borders width is ≤ termW but its width
+// *with* borders exceeds termW, neither the shrink nor the expand path
+// adjusts anything — the table renders at natural width and the terminal
+// clips the right edge. The visible overflow is bounded by (cols + 1) chars
+// and we accept it until the upstream fix lands.
 func newTable(headers []string, rows [][]string) *table.Table {
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
@@ -120,10 +127,10 @@ func stdoutWidth() (int, bool) {
 }
 
 // tableNaturalWidth estimates how wide the table would render without any
-// width constraint: sum of each column's widest cell + 2 chars padding per
-// column + (cols+1) vertical border chars (RoundedBorder draws separators
-// between every column plus the two outer edges). Used to decide whether the
-// table needs wrapping at all.
+// width constraint: sum of each column's widest cell + per-column padding +
+// (cols+1) vertical border chars (RoundedBorder draws separators between
+// every column plus the two outer edges). Used to decide whether the table
+// needs wrapping at all.
 func tableNaturalWidth(headers []string, rows [][]string) int {
 	cols := len(headers)
 	if cols == 0 {
@@ -145,7 +152,8 @@ func tableNaturalWidth(headers []string, rows [][]string) int {
 			}
 		}
 	}
-	total := cols*2 + cols + 1 // padding + borders
+	xPad := tableCellStyle.GetHorizontalPadding()
+	total := cols*xPad + cols + 1 // padding + borders
 	for _, w := range maxW {
 		total += w
 	}

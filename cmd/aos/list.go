@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/lipgloss/table"
+	"charm.land/lipgloss/v2"
+	"charm.land/lipgloss/v2/table"
 	"github.com/spf13/cobra"
 
 	"github.com/ultrakorne/aos_cli/internal/config"
