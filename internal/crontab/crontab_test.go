@@ -97,18 +97,41 @@ func TestExtractManagedDuplicateBeginsIsConflict(t *testing.T) {
 
 func TestBuildManagedBlockTickOnly(t *testing.T) {
 	tick := BuildTickCommand("/usr/local/bin/aos", "/data")
-	out := BuildManagedBlock(nil, "/wrap.sh", "/data", tick)
+	schedule := "*/10 * * * *"
+	out := BuildManagedBlock(nil, "/wrap.sh", "/data", schedule, tick)
 	if !strings.HasPrefix(out, BeginMarker+"\n") {
 		t.Errorf("missing begin: %q", out)
 	}
 	if !strings.HasSuffix(out, "\n"+EndMarker) {
 		t.Errorf("missing end: %q", out)
 	}
-	if !strings.Contains(out, TickCronSchedule) {
-		t.Errorf("missing tick schedule %q in %q", TickCronSchedule, out)
+	if !strings.Contains(out, schedule) {
+		t.Errorf("missing tick schedule %q in %q", schedule, out)
 	}
 	if !strings.Contains(out, "# agentic_os:"+TickMarkerID) {
 		t.Errorf("missing tick marker: %q", out)
+	}
+}
+
+func TestBuildManagedBlockHonorsTickSchedule(t *testing.T) {
+	// Schedule threads through end-to-end — a non-default interval should
+	// land verbatim in the managed block.
+	tick := BuildTickCommand("/usr/local/bin/aos", "/data")
+	out := BuildManagedBlock(nil, "/wrap.sh", "/data", "*/5 * * * *", tick)
+	if !strings.Contains(out, "*/5 * * * *") {
+		t.Errorf("custom tick schedule missing: %q", out)
+	}
+	if strings.Contains(out, "*/10 * * * *") {
+		t.Errorf("legacy default schedule leaked: %q", out)
+	}
+}
+
+func TestBuildManagedBlockSkipsTickWhenScheduleEmpty(t *testing.T) {
+	// Both schedule and command are required to emit the tick entry — an
+	// empty schedule means "no tick configured".
+	out := BuildManagedBlock(nil, "/wrap.sh", "/data", "", "doesnt-matter")
+	if strings.Contains(out, "# agentic_os:"+TickMarkerID) {
+		t.Errorf("tick entry emitted with empty schedule: %q", out)
 	}
 }
 
@@ -117,7 +140,7 @@ func TestBuildManagedBlockEntries(t *testing.T) {
 		{AgentID: "alpha", ScriptPath: "/agents/alpha.sh", Expression: "*/5 * * * *"},
 		{AgentID: "beta", ScriptPath: "/agents/beta.sh", Expression: "0 9 * * *"},
 	}
-	out := BuildManagedBlock(entries, "/wrap.sh", "/data", "")
+	out := BuildManagedBlock(entries, "/wrap.sh", "/data", "", "")
 	for _, want := range []string{
 		"*/5 * * * * '/wrap.sh' '/data' 'alpha' 'alpha' '/agents/alpha.sh' # agentic_os:alpha",
 		"0 9 * * * '/wrap.sh' '/data' 'beta' 'beta' '/agents/beta.sh' # agentic_os:beta",
@@ -132,7 +155,7 @@ func TestBuildManagedBlockQuotesSingleQuotes(t *testing.T) {
 	entries := []Entry{
 		{AgentID: "weird'id", ScriptPath: "/path/with'quote.sh", Expression: "* * * * *"},
 	}
-	out := BuildManagedBlock(entries, "/wrap.sh", "/data", "")
+	out := BuildManagedBlock(entries, "/wrap.sh", "/data", "", "")
 	// shellQuote turns ' into '\''
 	if !strings.Contains(out, `'weird'\''id'`) {
 		t.Errorf("AgentID not shell-escaped: %s", out)
@@ -155,7 +178,7 @@ func TestBuildTickCommandShape(t *testing.T) {
 func TestComputeNextEmptyEntriesRemovesBlock(t *testing.T) {
 	current := "before\n" + BeginMarker + "\nold line\n" + EndMarker + "\nafter\n"
 	ex := ExtractManaged(current)
-	got := computeNext(current, ex, nil, "/w", "/d", "")
+	got := computeNext(current, ex, nil, "/w", "/d", "", "")
 	if strings.Contains(got, BeginMarker) || strings.Contains(got, EndMarker) {
 		t.Errorf("markers not stripped: %q", got)
 	}
@@ -167,7 +190,7 @@ func TestComputeNextEmptyEntriesRemovesBlock(t *testing.T) {
 func TestComputeNextEmptyEntriesNoMarkerIsNoop(t *testing.T) {
 	current := "user1\nuser2\n"
 	ex := ExtractManaged(current)
-	got := computeNext(current, ex, nil, "/w", "/d", "")
+	got := computeNext(current, ex, nil, "/w", "/d", "", "")
 	if got != current {
 		t.Errorf("mutated input without markers: %q -> %q", current, got)
 	}
@@ -177,7 +200,7 @@ func TestComputeNextReplacesExistingBlock(t *testing.T) {
 	current := "user\n" + BeginMarker + "\nstale\n" + EndMarker + "\n"
 	ex := ExtractManaged(current)
 	entries := []Entry{{AgentID: "a", ScriptPath: "/a.sh", Expression: "* * * * *"}}
-	got := computeNext(current, ex, entries, "/w", "/d", "")
+	got := computeNext(current, ex, entries, "/w", "/d", "", "")
 	if strings.Contains(got, "stale") {
 		t.Errorf("stale entry survived: %q", got)
 	}
@@ -193,7 +216,7 @@ func TestComputeNextAppendsWhenNoMarker(t *testing.T) {
 	current := "user line\n"
 	ex := ExtractManaged(current)
 	entries := []Entry{{AgentID: "a", ScriptPath: "/a.sh", Expression: "* * * * *"}}
-	got := computeNext(current, ex, entries, "/w", "/d", "")
+	got := computeNext(current, ex, entries, "/w", "/d", "", "")
 	if !strings.HasPrefix(got, "user line\n") {
 		t.Errorf("user line not preserved at top: %q", got)
 	}

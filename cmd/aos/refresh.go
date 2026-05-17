@@ -182,11 +182,19 @@ func RunRefresh() (RefreshSummary, error) {
 			return sum, nil
 		}
 		tickCmd := crontab.BuildTickCommand(aosBin, cfg.AosHome)
+		tickSchedule, tickErr := cfg.EffectiveTickCronExpr()
+		if tickErr != nil {
+			// Bad tick_interval doesn't fail the refresh — fall back to the
+			// default cadence (returned by EffectiveTickCronExpr) and surface
+			// the parse error so the operator can fix config.toml.
+			fmt.Fprintf(os.Stderr, "warn: %v; using default tick interval (%s)\n", tickErr, config.DefaultTickInterval)
+		}
 		result, err := crontab.SyncCrontab(crontab.SyncArgs{
-			Entries:     entries,
-			WrapperPath: wrapperPath,
-			DataDir:     cfg.AosHome,
-			TickCommand: tickCmd,
+			Entries:      entries,
+			WrapperPath:  wrapperPath,
+			DataDir:      cfg.AosHome,
+			TickSchedule: tickSchedule,
+			TickCommand:  tickCmd,
 		})
 		if err != nil {
 			sum.Cron = "skipped:" + sanitize(err.Error())

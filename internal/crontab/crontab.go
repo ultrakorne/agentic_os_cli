@@ -14,8 +14,7 @@ const (
 	BeginMarker = "# BEGIN agentic_os (managed - do not edit)"
 	EndMarker   = "# END agentic_os"
 
-	TickCronSchedule = "*/10 * * * *"
-	TickMarkerID     = "__tick__"
+	TickMarkerID = "__tick__"
 )
 
 type Entry struct {
@@ -139,12 +138,16 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-func BuildManagedBlock(entries []Entry, wrapperPath, dataDir, tickCmd string) string {
+// BuildManagedBlock formats the managed crontab block. tickSchedule is the
+// cron expression for the __tick__ entry (typically the result of
+// TickCronExpr); it is only emitted when both tickSchedule and tickCmd are
+// non-empty.
+func BuildManagedBlock(entries []Entry, wrapperPath, dataDir, tickSchedule, tickCmd string) string {
 	var b strings.Builder
 	b.WriteString(BeginMarker)
-	if tickCmd != "" {
+	if tickCmd != "" && tickSchedule != "" {
 		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("%s %s # agentic_os:%s", TickCronSchedule, tickCmd, TickMarkerID))
+		b.WriteString(fmt.Sprintf("%s %s # agentic_os:%s", tickSchedule, tickCmd, TickMarkerID))
 	}
 	for _, e := range entries {
 		b.WriteString("\n")
@@ -171,11 +174,12 @@ func BuildTickCommand(aosBin, dataDir string) string {
 }
 
 type SyncArgs struct {
-	Entries     []Entry
-	WrapperPath string
-	DataDir     string
-	TickCommand string
-	Force       bool
+	Entries      []Entry
+	WrapperPath  string
+	DataDir      string
+	TickSchedule string
+	TickCommand  string
+	Force        bool
 }
 
 // SyncCrontab rebuilds the managed block from the given entries and writes
@@ -207,7 +211,7 @@ func SyncCrontab(args SyncArgs) (SyncResult, error) {
 		baseEx = ExtractManaged(base)
 	}
 
-	next := computeNext(base, baseEx, args.Entries, args.WrapperPath, args.DataDir, args.TickCommand)
+	next := computeNext(base, baseEx, args.Entries, args.WrapperPath, args.DataDir, args.TickSchedule, args.TickCommand)
 	if next == current {
 		return SyncResult{}, nil
 	}
@@ -238,7 +242,7 @@ func RemoveManaged() (SyncResult, error) {
 	return SyncResult{Wrote: true}, nil
 }
 
-func computeNext(current string, ex ManagedExtract, entries []Entry, wrapperPath, dataDir, tickCmd string) string {
+func computeNext(current string, ex ManagedExtract, entries []Entry, wrapperPath, dataDir, tickSchedule, tickCmd string) string {
 	if len(entries) == 0 && tickCmd == "" {
 		if !ex.HasMarker {
 			return current
@@ -253,7 +257,7 @@ func computeNext(current string, ex ManagedExtract, entries []Entry, wrapperPath
 		}
 		return before + "\n" + after
 	}
-	block := BuildManagedBlock(entries, wrapperPath, dataDir, tickCmd)
+	block := BuildManagedBlock(entries, wrapperPath, dataDir, tickSchedule, tickCmd)
 	if ex.HasMarker {
 		before := strings.TrimRight(ex.Before, "\n")
 		after := strings.TrimLeft(ex.After, "\n")

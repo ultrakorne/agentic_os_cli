@@ -94,7 +94,14 @@ func runTick() error {
 		catchups = fired
 	}
 
-	state := crontabState(cfg.AosHome, scan.Agents)
+	tickSchedule, tickErr := cfg.EffectiveTickCronExpr()
+	if tickErr != nil {
+		// Same posture as refresh: log and fall back to the default cadence
+		// returned by EffectiveTickCronExpr. The next refresh will rewrite
+		// the cron block once the user fixes config.toml.
+		fmt.Fprintf(os.Stderr, "[tick] warn: %v; using default tick interval (%s)\n", tickErr, config.DefaultTickInterval)
+	}
+	state := crontabState(cfg.AosHome, scan.Agents, tickSchedule)
 	summary := TickSummary{
 		Timestamp: now.UTC().Format(time.RFC3339),
 		Scripts:   len(scan.Agents),
@@ -159,7 +166,10 @@ func fireCatchups(aosHome string, agents []scheduler.Agent, runs []scheduler.Job
 // crontabState returns one of: managed | empty | conflict | drift | error(<msg>).
 // "drift" means: a managed block exists, but rebuilding it from the live
 // agents would produce a different block. The user should run `aos refresh`.
-func crontabState(dataDir string, agents []scheduler.Agent) string {
+// tickSchedule is the configured tick cron expression — passing it lets the
+// drift check notice when the on-disk block still references the previous
+// schedule after the user edits config.toml.
+func crontabState(dataDir string, agents []scheduler.Agent, tickSchedule string) string {
 	if !runtime.HasBin("crontab") {
 		return "error(no-crontab-bin)"
 	}
@@ -195,7 +205,7 @@ func crontabState(dataDir string, agents []scheduler.Agent) string {
 	if err != nil {
 		return "error(" + sanitize(err.Error()) + ")"
 	}
-	expectedBlock := crontab.BuildManagedBlock(entries, wrapperPath, dataDir, crontab.BuildTickCommand(aosBin, dataDir))
+	expectedBlock := crontab.BuildManagedBlock(entries, wrapperPath, dataDir, tickSchedule, crontab.BuildTickCommand(aosBin, dataDir))
 	actualBlock := crontab.BeginMarker + "\n" + strings.Join(ex.Managed, "\n") + "\n" + crontab.EndMarker
 	if actualBlock == expectedBlock {
 		return "managed"

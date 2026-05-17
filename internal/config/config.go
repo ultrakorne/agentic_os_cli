@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -14,6 +15,10 @@ import (
 // <aos_home>/runs/. `aos refresh` deletes the oldest pairs once the count
 // exceeds this cap.
 const DefaultRunsHardCap = 2000
+
+// DefaultTickInterval is how often the cron `__tick__` entry fires by
+// default. Format is a Go duration string accepted by time.ParseDuration.
+const DefaultTickInterval = "10m"
 
 type Config struct {
 	AosHome string `toml:"aos_home"`
@@ -25,6 +30,12 @@ type Config struct {
 	// the TOML (the common case) is distinguishable from an explicit
 	// `catchup_enabled = false`; consume via EffectiveCatchupEnabled.
 	CatchupEnabled *bool `toml:"catchup_enabled,omitempty"`
+	// TickInterval controls how often the managed cron `__tick__` entry
+	// fires. Format is a Go duration string ("10m", "30m", "1h", "6h").
+	// Accepts whole minutes in [1, 59] (compiled to `*/N * * * *`) or
+	// whole hours in [1, 23] (compiled to `0 */H * * *`); anything else is
+	// rejected and the default is used. Consume via EffectiveTickCronExpr.
+	TickInterval string `toml:"tick_interval"`
 }
 
 // EffectiveRunsHardCap returns the configured cap or DefaultRunsHardCap when
@@ -45,6 +56,54 @@ func (c *Config) EffectiveCatchupEnabled() bool {
 		return true
 	}
 	return *c.CatchupEnabled
+}
+
+// EffectiveTickCronExpr parses the configured TickInterval and returns the
+// equivalent crontab(5) schedule. The returned expression is always usable:
+// on parse failure the function falls back to DefaultTickInterval and returns
+// a non-nil error describing what was wrong so the caller can log it.
+//
+// Accepted durations are whole minutes in [1, 59] → `*/N * * * *`, or whole
+// hours in [1, 23] → `0 */H * * *`. Sub-minute precision, non-divisible
+// hour intervals, and intervals ≥ 24h are rejected — system cron's `*/N`
+// step syntax can't express them cleanly.
+func (c *Config) EffectiveTickCronExpr() (string, error) {
+	raw := DefaultTickInterval
+	if c != nil && c.TickInterval != "" {
+		raw = c.TickInterval
+	}
+	expr, err := parseTickInterval(raw)
+	if err != nil {
+		// Defaults are validated by tests, so this second parse never fails.
+		def, _ := parseTickInterval(DefaultTickInterval)
+		return def, fmt.Errorf("invalid tick_interval %q: %w", raw, err)
+	}
+	return expr, nil
+}
+
+func parseTickInterval(s string) (string, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return "", err
+	}
+	if d < time.Minute {
+		return "", fmt.Errorf("must be at least 1 minute")
+	}
+	if d%time.Minute != 0 {
+		return "", fmt.Errorf("must be a whole number of minutes")
+	}
+	minutes := int(d / time.Minute)
+	if minutes < 60 {
+		return fmt.Sprintf("*/%d * * * *", minutes), nil
+	}
+	if minutes%60 != 0 {
+		return "", fmt.Errorf("intervals over 59m must be a whole number of hours")
+	}
+	hours := minutes / 60
+	if hours > 23 {
+		return "", fmt.Errorf("must be at most 23h")
+	}
+	return fmt.Sprintf("0 */%d * * *", hours), nil
 }
 
 func Dir() (string, error) {

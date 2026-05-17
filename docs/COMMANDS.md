@@ -21,7 +21,7 @@ both surfaces consistent: every `--json` branch funnels through `printJSON`
 | [`aos init <path>`](#aos-init) | Create the aos home, write `wrapper.sh`, sync crontab |
 | [`aos home`](#aos-home) | Print the configured `aos_home` path |
 | [`aos refresh`](#aos-refresh) | Rescan agents and rewrite the managed crontab block |
-| [`aos tick`](#aos-tick) | One scheduler tick (cron invokes this every 10 min) |
+| [`aos tick`](#aos-tick) | One scheduler tick (cron invokes this on the configured `tick_interval`, default every 10 min) |
 | [`aos list`](#aos-list) | Enumerate every agent with section, schedule summary, description |
 | [`aos describe <id> [text]`](#aos-describe) | Show one agent's full record; optionally rewrite its description |
 | [`aos schedule <id> ...`](#aos-schedule) | Set or clear an agent's schedule; auto-refreshes cron |
@@ -52,10 +52,18 @@ the available knobs are visible without reading docs:
 aos_home = '/home/you/aos_home'
 runs_hard_cap = 2000
 catchup_enabled = true
+tick_interval = "10m"
 ```
 
-Re-running `aos init` preserves user-set values for `runs_hard_cap` and
-`catchup_enabled`; only `aos_home` is updated to the new path.
+Re-running `aos init` preserves user-set values for `runs_hard_cap`,
+`catchup_enabled`, and `tick_interval`; only `aos_home` is updated to the
+new path. `tick_interval` is a Go duration string — accepted forms are
+whole minutes `"1m"`–`"59m"` (compiled to `*/N * * * *`) or whole hours
+`"1h"`–`"23h"` (compiled to `0 */H * * *`). Anything else (e.g. `"90m"`,
+`"24h"`, sub-minute precision) is rejected: `aos refresh` and `aos tick`
+log the parse error to stderr and fall back to the default `"10m"`
+schedule. Edit the value and run `aos refresh` to reschedule the managed
+`__tick__` cron entry.
 
 **Human output** (styled key/value block):
 
@@ -148,8 +156,9 @@ aos tick
 aos tick --json
 ```
 
-Invoked by cron via the managed `__tick__` line every 10 minutes. Three
-things happen each tick, in order:
+Invoked by cron via the managed `__tick__` line at the cadence set by
+`tick_interval` in `config.toml` (default every 10 minutes). Three things
+happen each tick, in order:
 
 1. **Detect missed slots.** For each scheduled agent, find the most-recent
    uncovered slot ≤ now and persist it as `runs/miss-<agent>-<expectedAt>.json`

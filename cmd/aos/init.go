@@ -110,6 +110,9 @@ func mergeInitConfig(existing *config.Config, target string) *config.Config {
 		t := true
 		cfg.CatchupEnabled = &t
 	}
+	if cfg.TickInterval == "" {
+		cfg.TickInterval = config.DefaultTickInterval
+	}
 	return cfg
 }
 

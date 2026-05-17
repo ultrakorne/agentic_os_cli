@@ -21,17 +21,21 @@ func TestMergeInitConfig_freshWritesDefaults(t *testing.T) {
 	if got.CatchupEnabled == nil || !*got.CatchupEnabled {
 		t.Errorf("CatchupEnabled = %v, want pointer to true", got.CatchupEnabled)
 	}
+	if got.TickInterval != config.DefaultTickInterval {
+		t.Errorf("TickInterval = %q, want %q", got.TickInterval, config.DefaultTickInterval)
+	}
 }
 
 func TestMergeInitConfig_preservesUserSetValues(t *testing.T) {
 	// Re-init must not silently wipe user choices. A user who disabled
-	// catch-up or tightened the runs cap should find their values intact
-	// after re-running `aos init <path>`.
+	// catch-up, tightened the runs cap, or sped up the tick should find
+	// their values intact after re-running `aos init <path>`.
 	fls := false
 	existing := &config.Config{
 		AosHome:        "/old/home",
 		RunsHardCap:    500,
 		CatchupEnabled: &fls,
+		TickInterval:   "5m",
 	}
 	got := mergeInitConfig(existing, "/new/home")
 
@@ -44,6 +48,9 @@ func TestMergeInitConfig_preservesUserSetValues(t *testing.T) {
 	if got.CatchupEnabled == nil || *got.CatchupEnabled {
 		t.Errorf("CatchupEnabled = %v, want pointer to false (preserved)", got.CatchupEnabled)
 	}
+	if got.TickInterval != "5m" {
+		t.Errorf("TickInterval = %q, want \"5m\" (preserved)", got.TickInterval)
+	}
 }
 
 func TestMergeInitConfig_normalizesInvalidRunsHardCap(t *testing.T) {
@@ -54,6 +61,18 @@ func TestMergeInitConfig_normalizesInvalidRunsHardCap(t *testing.T) {
 	got := mergeInitConfig(existing, "/tmp/x")
 	if got.RunsHardCap != config.DefaultRunsHardCap {
 		t.Errorf("RunsHardCap = %d, want default %d", got.RunsHardCap, config.DefaultRunsHardCap)
+	}
+}
+
+func TestMergeInitConfig_preservesInvalidTickIntervalForLaterWarning(t *testing.T) {
+	// Init doesn't second-guess the user's TickInterval string: a malformed
+	// value is preserved so the next `aos refresh` (or `aos tick`) logs the
+	// concrete error and falls back to the default. Silently rewriting
+	// would hide the misconfiguration from whoever wrote it.
+	existing := &config.Config{TickInterval: "90m"}
+	got := mergeInitConfig(existing, "/tmp/x")
+	if got.TickInterval != "90m" {
+		t.Errorf("TickInterval = %q, want \"90m\" preserved", got.TickInterval)
 	}
 }
 
