@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,6 +76,7 @@ type detailsPane int
 const (
 	paneConfig detailsPane = iota
 	paneHistory
+	numPanes // sentinel — keep last; used as the modulus for tab cycling
 )
 
 type detailsKind int
@@ -383,6 +385,16 @@ func (m *detailsModel) Update(msg tea.Msg) (*detailsModel, tea.Cmd) {
 		m.runOut.SetYOffset(0)
 		return m, nil
 
+	case refreshDoneMsg:
+		// Save already optimistically set "saved"; only adjust the toast
+		// when refresh actually failed. Successful refresh stays silent so
+		// the user sees one steady "saved" and not a flicker.
+		if msg.err != nil {
+			m.setToast(fmt.Sprintf("saved, refresh failed: %v", msg.err))
+			return m, m.toastClearCmd()
+		}
+		return m, nil
+
 	case clearToastMsg:
 		if time.Now().After(m.toastUntil) {
 			m.toast = ""
@@ -416,11 +428,11 @@ func (m *detailsModel) handleKey(msg tea.KeyMsg) (*detailsModel, tea.Cmd) {
 		return m, func() tea.Msg { return popupClosedMsg{} }
 	}
 	if key.Matches(msg, m.keys.NextPane) {
-		m.active = detailsPane((int(m.active) + 1) % 2)
+		m.active = detailsPane((int(m.active) + 1) % int(numPanes))
 		return m, nil
 	}
 	if key.Matches(msg, m.keys.PrevPane) {
-		m.active = detailsPane((int(m.active) + 1) % 2)
+		m.active = detailsPane((int(m.active) + int(numPanes) - 1) % int(numPanes))
 		return m, nil
 	}
 	switch msg.String() {
@@ -510,10 +522,10 @@ func (m *detailsModel) configAdjust(delta int) (*detailsModel, tea.Cmd) {
 	switch m.configFocus {
 	case focusKind:
 		next := int(m.schedKind) + delta
-		if next < 0 {
-			next = 0
-		} else if next > 2 {
-			next = 2
+		if next < int(kindOff) {
+			next = int(kindOff)
+		} else if next > int(kindDaily) {
+			next = int(kindDaily)
 		}
 		m.schedKind = detailsKind(next)
 		// New kind may have a different focus chain — clamp focus into it.
@@ -585,11 +597,11 @@ func (m *detailsModel) blurAllInputs() {
 }
 
 // saveAll persists description and schedule in one shot, the way a "save"
-// button is expected to behave. Description is only written when it actually
-// changed (avoids touching mtime for nothing); schedule is rewritten every
-// time so kind/day flips and cron reconcile pick up the new spec.
+// button is expected to behave. Both writes are skipped when the underlying
+// value didn't actually change — touching mtime for nothing would confuse any
+// downstream watcher. Cron reconcile is dispatched as a tea.Cmd so the shell
+// out to `crontab -l/-w` doesn't freeze the Update goroutine on slow disks.
 func (m *detailsModel) saveAll() (*detailsModel, tea.Cmd) {
-	var cmds []tea.Cmd
 	descTrimmed := strings.TrimRight(m.desc.Value(), "\n")
 	descChanged := descTrimmed != m.agent.Meta.Description
 
@@ -638,6 +650,7 @@ func (m *detailsModel) saveAll() (*detailsModel, tea.Cmd) {
 		m.setToast(err.Error())
 		return m, m.toastClearCmd()
 	}
+	schedChanged := !schedulesEqual(spec, m.agent.Meta.Schedule)
 
 	meta := m.agent.Meta
 	if descChanged {
@@ -648,42 +661,90 @@ func (m *detailsModel) saveAll() (*detailsModel, tea.Cmd) {
 		}
 		meta = updated
 	}
-	updated, err := scheduler.WriteSchedule(m.metaPath, spec, time.Now())
-	if err != nil {
-		m.setToast(fmt.Sprintf("save sched: %v", err))
-		return m, m.toastClearCmd()
-	}
-	meta = updated
-
-	// Best-effort cron reconcile so the new schedule actually fires; surface
-	// failures as a toast but don't block the save itself.
-	if _, refErr := RunRefresh(); refErr != nil {
-		m.setToast(fmt.Sprintf("saved, refresh failed: %v", refErr))
-	} else {
-		m.setToast("saved")
+	if schedChanged {
+		updated, err := scheduler.WriteSchedule(m.metaPath, spec, time.Now())
+		if err != nil {
+			m.setToast(fmt.Sprintf("save sched: %v", err))
+			return m, m.toastClearCmd()
+		}
+		meta = updated
 	}
 	m.agent.Meta = meta
-	cmds = append(cmds, m.toastClearCmd())
+
+	if !descChanged && !schedChanged {
+		m.setToast("no changes")
+		return m, m.toastClearCmd()
+	}
+
+	m.setToast("saved")
+	cmds := []tea.Cmd{m.toastClearCmd()}
 	agentID := m.agent.ID
 	cmds = append(cmds, func() tea.Msg {
 		return agentMetaUpdatedMsg{agentID: agentID, meta: meta}
 	})
+	// Reconcile cron in the background — RunRefresh shells out to crontab
+	// and re-scans every agent meta. Surfacing the result via a tea.Msg
+	// keeps the UI responsive on slow systems.
+	if schedChanged {
+		cmds = append(cmds, refreshScheduleCmd())
+	}
 	return m, tea.Batch(cmds...)
 }
 
-// atoiSafe parses an int and returns a friendly error so the toast doesn't
-// quote a stdlib strconv path.
+// refreshDoneMsg carries the outcome of an async RunRefresh kicked off from
+// the popup save flow. The popup updates its toast on receipt.
+type refreshDoneMsg struct {
+	err error
+}
+
+func refreshScheduleCmd() tea.Cmd {
+	return func() tea.Msg {
+		_, err := RunRefresh()
+		return refreshDoneMsg{err: err}
+	}
+}
+
+// schedulesEqual returns true when two ScheduleSpec pointers describe the
+// same firing pattern. Day order doesn't matter (a "mon,fri" save followed
+// by "fri,mon" should not rewrite the file). Both nil counts as equal so
+// the "no change" path also catches off → off.
+func schedulesEqual(a, b *scheduler.ScheduleSpec) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Kind != b.Kind || a.EveryHours != b.EveryHours ||
+		a.Hour != b.Hour || a.Minute != b.Minute {
+		return false
+	}
+	if len(a.Days) != len(b.Days) {
+		return false
+	}
+	have := make(map[scheduler.Weekday]struct{}, len(a.Days))
+	for _, d := range a.Days {
+		have[d] = struct{}{}
+	}
+	for _, d := range b.Days {
+		if _, ok := have[d]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// atoiSafe wraps strconv.Atoi with a UI-friendlier error message — the
+// stdlib's "strconv.Atoi: parsing \"x\": invalid syntax" leaks the package
+// path into the toast, which looks broken next to the rest of the UI copy.
 func atoiSafe(s string) (int, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, fmt.Errorf("empty")
 	}
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0, fmt.Errorf("expected a number, got %q", s)
-		}
-		n = n*10 + int(r-'0')
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("expected a number, got %q", s)
 	}
 	return n, nil
 }

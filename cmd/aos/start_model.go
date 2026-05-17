@@ -356,9 +356,11 @@ func (m *startModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.popup = nil
 		return m, nil
 	case agentMetaUpdatedMsg:
+		// The popup is the only thing that emits this; it already updates
+		// its own state synchronously inside saveAll. Parent's job is just
+		// to mirror the change onto the underlying dashboard row.
 		m.applyMetaUpdate(msg.agentID, msg.meta)
-		// Don't drop msg — popup also wants to acknowledge it via the
-		// usual flow (toast clear etc.). Fall through.
+		return m, nil
 	case runChangedMsg:
 		// Watcher events MUST be handled at the parent regardless of popup
 		// state. Each watchCmd reads one event from m.events and exits; if
