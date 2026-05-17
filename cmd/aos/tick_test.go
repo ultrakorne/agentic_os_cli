@@ -29,7 +29,7 @@ func installFakeWrapper(t *testing.T, aosHome string) string {
 	return log
 }
 
-func writeRunFile(t *testing.T, runsDir string, run scheduler.JobRun) {
+func writeRunFile(t *testing.T, runsDir string, run scheduler.Run) {
 	t.Helper()
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
 		t.Fatalf("mkdir runs: %v", err)
@@ -66,7 +66,7 @@ func waitForLines(t *testing.T, path string, want int, timeout time.Duration) []
 }
 
 // TestFireCatchups_spawnsForMissedLatest covers the integration: a real
-// agent script + wrapper on disk + a JobRun{status:"missed"} record → one
+// agent script + wrapper on disk + a Run{status:"missed"} record → one
 // catch-up wrapper invocation with the missed slot as scheduleId.
 func TestFireCatchups_spawnsForMissedLatest(t *testing.T) {
 	tmp := t.TempDir()
@@ -82,9 +82,9 @@ func TestFireCatchups_spawnsForMissedLatest(t *testing.T) {
 	}
 
 	missedSlot := "2026-05-17T11:00:00Z"
-	writeRunFile(t, filepath.Join(aosHome, "runs"), scheduler.JobRun{
+	writeRunFile(t, filepath.Join(aosHome, "runs"), scheduler.Run{
 		ID:        "miss-ping-2026-05-17T11-00-00Z",
-		JobID:     "ping",
+		AgentID:     "ping",
 		StartedAt: missedSlot,
 		Status:    scheduler.StatusMissed,
 		Trigger:   "schedule",
@@ -138,16 +138,16 @@ func TestFireCatchups_noopWhenLatestIsCompleted(t *testing.T) {
 	}
 
 	runsDir := filepath.Join(aosHome, "runs")
-	writeRunFile(t, runsDir, scheduler.JobRun{
+	writeRunFile(t, runsDir, scheduler.Run{
 		ID:        "miss-ping",
-		JobID:     "ping",
+		AgentID:     "ping",
 		StartedAt: "2026-05-17T11:00:00Z",
 		Status:    scheduler.StatusMissed,
 		Trigger:   "schedule",
 	})
-	writeRunFile(t, runsDir, scheduler.JobRun{
+	writeRunFile(t, runsDir, scheduler.Run{
 		ID:        "later-success",
-		JobID:     "ping",
+		AgentID:     "ping",
 		StartedAt: "2026-05-17T11:30:00Z",
 		Status:    scheduler.StatusSuccess,
 		Trigger:   "schedule",

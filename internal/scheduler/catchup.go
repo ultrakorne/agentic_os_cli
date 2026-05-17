@@ -30,14 +30,14 @@ type CatchupCandidate struct {
 // emits just "Z". ASCII '.' (46) < 'Z' (90), so a same-second wrapper run
 // would lex-compare *before* its covering miss — flipping the order and
 // triggering a phantom catch-up.
-func DetectCatchups(agents []Agent, runs []JobRun) []CatchupCandidate {
-	latestByAgent := map[string]JobRun{}
+func DetectCatchups(agents []Agent, runs []Run) []CatchupCandidate {
+	latestByAgent := map[string]Run{}
 	for _, r := range runs {
-		if r.JobID == "" || r.StartedAtTime.IsZero() {
+		if r.AgentID == "" || r.StartedAtTime.IsZero() {
 			continue
 		}
-		if prev, ok := latestByAgent[r.JobID]; !ok || r.StartedAtTime.After(prev.StartedAtTime) {
-			latestByAgent[r.JobID] = r
+		if prev, ok := latestByAgent[r.AgentID]; !ok || r.StartedAtTime.After(prev.StartedAtTime) {
+			latestByAgent[r.AgentID] = r
 		}
 	}
 

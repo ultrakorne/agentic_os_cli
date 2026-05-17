@@ -85,7 +85,7 @@ func showOneRun(runsDir, runID string) error {
 	return printOneRunHuman(run)
 }
 
-func printRunsHuman(runs []scheduler.JobRun, total int) error {
+func printRunsHuman(runs []scheduler.Run, total int) error {
 	if total == 0 {
 		fmt.Println(styleMuted.Render("(no runs)"))
 		return nil
@@ -94,7 +94,7 @@ func printRunsHuman(runs []scheduler.JobRun, total int) error {
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
 		rows = append(rows, []string{
-			r.ID, r.JobID, string(r.Status), r.Trigger,
+			r.ID, r.AgentID, string(r.Status), r.Trigger,
 			formatStartedAt(r.StartedAt), elapsedString(r),
 		})
 	}
@@ -134,14 +134,14 @@ func runsCountSummary(shown, total int, agentID string) string {
 	return fmt.Sprintf("showing %d %s%s", total, noun, suffix)
 }
 
-// formatRun renders a JobRun as the kv block + "output" section, returning a
+// formatRun renders a Run as the kv block + "output" section, returning a
 // single string. Shared between the `aos runs <id>` human view and the start
 // TUI's detail popup so both surfaces stay aligned when fields are added or
 // the rendering shifts.
-func formatRun(r scheduler.JobRun) string {
+func formatRun(r scheduler.Run) string {
 	statusS := statusStyle(string(r.Status))
 	rows := []kvRow{
-		{Key: "agent", Value: r.JobID},
+		{Key: "agent", Value: r.AgentID},
 		{Key: "status", Value: string(r.Status), Style: &statusS},
 		{Key: "trigger", Value: r.Trigger},
 		{Key: "startedAt", Value: formatStartedAt(r.StartedAt)},
@@ -177,7 +177,7 @@ func formatRun(r scheduler.JobRun) string {
 	return b.String()
 }
 
-func printOneRunHuman(r scheduler.JobRun) error {
+func printOneRunHuman(r scheduler.Run) error {
 	banner("runs " + r.ID)
 	fmt.Print(formatRun(r))
 	return nil
@@ -187,7 +187,7 @@ func printOneRunHuman(r scheduler.JobRun) error {
 // and a ms-precision duration once the wrapper has recorded the end. Missed
 // runs never ran, so they render as an em-dash. Falls back to "-" if either
 // timestamp won't parse — better than a panic.
-func elapsedString(r scheduler.JobRun) string {
+func elapsedString(r scheduler.Run) string {
 	if r.Status == scheduler.StatusMissed {
 		return "—"
 	}
@@ -202,7 +202,7 @@ func elapsedString(r scheduler.JobRun) string {
 	return end.Sub(start).Truncate(time.Millisecond).String()
 }
 
-func exitString(r scheduler.JobRun) string {
+func exitString(r scheduler.Run) string {
 	if r.Status == scheduler.StatusMissed {
 		return "—"
 	}

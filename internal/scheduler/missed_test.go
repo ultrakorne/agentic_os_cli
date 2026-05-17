@@ -66,10 +66,10 @@ func TestDetectMissed_coveredSlotProducesNothing(t *testing.T) {
 	a := hourlyAgent("ping", 0, scheduledAt)
 
 	// Successful run at the 12:00 slot — covers it via rule (a) (within jitter).
-	runs := []JobRun{
+	runs := []Run{
 		{
 			ID:            "real-12",
-			JobID:         "ping",
+			AgentID:         "ping",
 			StartedAt:     "2026-05-16T12:00:00.500Z",
 			Status:        StatusSuccess,
 			StartedAtTime: time.Date(2026, 5, 16, 12, 0, 0, 500_000_000, time.UTC),
@@ -89,10 +89,10 @@ func TestDetectMissed_recordedMissCoversItsSlot(t *testing.T) {
 	a := hourlyAgent("ping", 0, scheduledAt)
 
 	slot := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
-	runs := []JobRun{
+	runs := []Run{
 		{
 			ID:            MissedRunID("ping", slot),
-			JobID:         "ping",
+			AgentID:         "ping",
 			StartedAt:     slot.UTC().Format(time.RFC3339Nano),
 			Status:        StatusMissed,
 			StartedAtTime: slot,
@@ -112,10 +112,10 @@ func TestDetectMissed_terminalRunAfterSlotCoversIt(t *testing.T) {
 	a := hourlyAgent("ping", 0, scheduledAt)
 
 	manualRunAt := time.Date(2026, 5, 16, 12, 20, 0, 0, time.UTC)
-	runs := []JobRun{
+	runs := []Run{
 		{
 			ID:            "manual-run",
-			JobID:         "ping",
+			AgentID:         "ping",
 			StartedAt:     manualRunAt.UTC().Format(time.RFC3339Nano),
 			Status:        StatusSuccess,
 			StartedAtTime: manualRunAt,

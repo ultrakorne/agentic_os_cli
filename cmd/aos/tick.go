@@ -136,7 +136,7 @@ func runTick() error {
 //
 // `runs` is the post-RecordMissedRuns view of the runs/ directory — pass it
 // through from tick so a 2000-file directory isn't walked twice per tick.
-func fireCatchups(aosHome string, agents []scheduler.Agent, runs []scheduler.JobRun) (int, error) {
+func fireCatchups(aosHome string, agents []scheduler.Agent, runs []scheduler.Run) (int, error) {
 	wrapperPath := filepath.Join(aosHome, "wrapper.sh")
 	if !runtime.FileExists(wrapperPath) || !runtime.IsExecutable(wrapperPath) {
 		// Mirrors aos run's posture: without a usable wrapper we can't spawn

@@ -19,7 +19,7 @@ var runCmd = &cobra.Command{
 	Use:   "run <id>",
 	Short: "Spawn a manual run of an agent in the background",
 	Long: `Start a manual run of <id> by spawning wrapper.sh detached from this
-process. Prints a JobRun stub (id, jobId, startedAt, status="running", ...) so
+process. Prints a Run stub (id, agentId, startedAt, status="running", ...) so
 callers can record the new run id without waiting for the wrapper to finish;
 the wrapper writes the final status to <aos_home>/runs/<run-id>.json.
 
@@ -83,7 +83,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("spawn wrapper: %w", err)
 	}
 
-	stub := jobRunStub(runID, agent.ID, startedAt, estimateMillis)
+	stub := runStub(runID, agent.ID, startedAt, estimateMillis)
 	if JSONOutput() {
 		if err := printJSON(stub); err != nil {
 			return err
@@ -98,18 +98,18 @@ func runRun(cmd *cobra.Command, args []string) error {
 	return waitFlow(filepath.Join(cfg.AosHome, "runs"), runID, agent.ID, now, estimateDur)
 }
 
-// jobRunStub mirrors the JobRun JSON shape the renderer expects, plus an
+// runStub mirrors the Run JSON shape the renderer expects, plus an
 // estimate field for the launcher response. The wrapper overwrites the on-disk
 // record once it finishes; this stub only documents what the caller can poll
 // for.
-func jobRunStub(runID, agentID, startedAt string, estimateMillis ...int64) map[string]any {
+func runStub(runID, agentID, startedAt string, estimateMillis ...int64) map[string]any {
 	estimate := int64(-1)
 	if len(estimateMillis) > 0 {
 		estimate = estimateMillis[0]
 	}
 	return map[string]any{
 		"id":         runID,
-		"jobId":      agentID,
+		"agentId":      agentID,
 		"scheduleId": nil,
 		"trigger":    "manual",
 		"startedAt":  startedAt,
@@ -124,7 +124,7 @@ func jobRunStub(runID, agentID, startedAt string, estimateMillis ...int64) map[s
 }
 
 func printRunHuman(stub map[string]any) error {
-	banner("run " + fmt.Sprint(stub["jobId"]))
+	banner("run " + fmt.Sprint(stub["agentId"]))
 	statusS := statusStyle(fmt.Sprint(stub["status"]))
 	printKV([]kvRow{
 		{Key: "run", Value: fmt.Sprint(stub["id"])},

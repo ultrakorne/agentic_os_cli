@@ -62,7 +62,7 @@ type detailsModel struct {
 	runsTable   table.Model
 	runOut      viewport.Model
 	runOutID    string
-	runsRecords []scheduler.JobRun
+	runsRecords []scheduler.Run
 
 	help help.Model
 	keys detailsKeyMap
@@ -312,7 +312,7 @@ func (m *detailsModel) loadRunsCmd() tea.Cmd {
 }
 
 type detailsRunsLoadedMsg struct {
-	runs []scheduler.JobRun
+	runs []scheduler.Run
 	err  error
 }
 
@@ -781,10 +781,10 @@ func (m *detailsModel) handleHistoryNav(msg tea.KeyMsg) (*detailsModel, tea.Cmd)
 	return m, cmd
 }
 
-func (m *detailsModel) selectedRun() (scheduler.JobRun, bool) {
+func (m *detailsModel) selectedRun() (scheduler.Run, bool) {
 	idx := m.runsTable.Cursor()
 	if idx < 0 || idx >= len(m.runsRecords) {
-		return scheduler.JobRun{}, false
+		return scheduler.Run{}, false
 	}
 	return m.runsRecords[idx], true
 }
@@ -799,7 +799,7 @@ func (m *detailsModel) selectedRun() (scheduler.JobRun, bool) {
 // just an empty pane. Any other failure (missing .json record, permission
 // denied, IO error) flows through runOutputLoadedMsg.err so the user sees
 // the actual problem instead of a misleading "(no output)".
-func (m *detailsModel) loadRunOutputCmd(r scheduler.JobRun) tea.Cmd {
+func (m *detailsModel) loadRunOutputCmd(r scheduler.Run) tea.Cmd {
 	runsDir := m.runsDir
 	return func() tea.Msg {
 		out, err := scheduler.ReadRunOutput(runsDir, r.ID)

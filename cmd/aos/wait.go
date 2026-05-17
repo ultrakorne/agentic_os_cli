@@ -24,7 +24,7 @@ var ErrWaitCanceled = errors.New("wait canceled")
 // waitFlow runs the bubble-tea progress/spinner on stderr while the detached
 // wrapper writes the run record to runsDir, then prints the .out bytes to
 // stdout. estimate < 0 means "no historical data" and forces the indeterminate
-// spinner. The caller (runRun) has already printed the JobRun stub on stdout
+// spinner. The caller (runRun) has already printed the Run stub on stdout
 // before calling us, so the final layout is:
 //
 //	stdout: <stub (human or json)>      ← printed by runRun
@@ -62,7 +62,7 @@ func waitFlow(runsDir, runID, agentID string, startedAt time.Time, estimate time
 // non-nil error if the run did not succeed (status=error, or exitCode != 0).
 // The plan requires output-first, error-second so a failed run's stderr still
 // reaches the user before we abort.
-func finalizeRun(runsDir, runID string, run scheduler.JobRun, stdout io.Writer) error {
+func finalizeRun(runsDir, runID string, run scheduler.Run, stdout io.Writer) error {
 	data, _ := scheduler.ReadRunOutput(runsDir, runID)
 	if len(data) > 0 {
 		_, _ = stdout.Write(data)
@@ -87,7 +87,7 @@ type waitTickMsg time.Time
 // waitDoneMsg arrives once the polling goroutine reaches a terminal record
 // or its context is canceled.
 type waitDoneMsg struct {
-	run scheduler.JobRun
+	run scheduler.Run
 	err error
 }
 
@@ -102,7 +102,7 @@ type waitModel struct {
 	sp  spinner.Model
 	bar progress.Model
 
-	final    *scheduler.JobRun
+	final    *scheduler.Run
 	err      error
 	canceled bool
 }

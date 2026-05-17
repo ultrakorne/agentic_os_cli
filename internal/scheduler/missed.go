@@ -34,7 +34,7 @@ var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month 
 // DetectMissed returns at most one MissedRun per agent: the most-recent
 // expected slot <= now that no run covers. By design we don't surface every
 // missed slot in a multi-slot outage — once the latest is recorded as a
-// JobRun{status:"missed"} on disk, rule (a) below covers it on subsequent
+// Run{status:"missed"} on disk, rule (a) below covers it on subsequent
 // ticks. Replacement (one miss file per agent at a time) happens in
 // RecordMissedRuns.
 //
@@ -46,7 +46,7 @@ var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month 
 //	(b) any terminal run (success|error) at-or-after the slot — manual
 //	    catch-up or a later scheduled fire.
 //	(c) any running record at-or-after slot - jitter — wrapper in flight.
-func DetectMissed(agents []Agent, runs []JobRun, opts DetectOpts) []MissedRun {
+func DetectMissed(agents []Agent, runs []Run, opts DetectOpts) []MissedRun {
 	now := opts.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -115,17 +115,17 @@ func DetectMissed(agents []Agent, runs []JobRun, opts DetectOpts) []MissedRun {
 	return out
 }
 
-func filterRuns(runs []JobRun, agentID string) []JobRun {
-	out := make([]JobRun, 0, len(runs))
+func filterRuns(runs []Run, agentID string) []Run {
+	out := make([]Run, 0, len(runs))
 	for _, r := range runs {
-		if r.JobID == agentID && !r.StartedAtTime.IsZero() {
+		if r.AgentID == agentID && !r.StartedAtTime.IsZero() {
 			out = append(out, r)
 		}
 	}
 	return out
 }
 
-func isCovered(E time.Time, runs []JobRun, jitter time.Duration) bool {
+func isCovered(E time.Time, runs []Run, jitter time.Duration) bool {
 	earliest := E.Add(-jitter)
 	latest := E.Add(jitter)
 	for _, r := range runs {

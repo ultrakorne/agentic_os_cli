@@ -34,11 +34,11 @@ func MissedRunID(agentID string, expectedAt time.Time) string {
 //   - written: misses actually written this call (zero when every detected
 //     miss already has a matching file on disk). aos tick / aos refresh
 //     surface the count as their "newly recorded this tick" summary.
-//   - updated: the post-write []JobRun. Same shape as a fresh LoadRuns
+//   - updated: the post-write []Run. Same shape as a fresh LoadRuns
 //     would produce — stale miss records removed, new ones appended with
 //     StartedAtTime populated — so the caller can chain into a follow-up
 //     pass (DetectCatchups in aos tick) without re-reading the directory.
-func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRun, []JobRun, error) {
+func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRun, []Run, error) {
 	runsDir := filepath.Join(aosHome, "runs")
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
 		return nil, nil, fmt.Errorf("mkdir runs: %w", err)
@@ -65,7 +65,7 @@ func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRu
 		if r.Status != StatusMissed {
 			continue
 		}
-		existingByAgent[r.JobID] = append(existingByAgent[r.JobID], r.ID)
+		existingByAgent[r.AgentID] = append(existingByAgent[r.AgentID], r.ID)
 	}
 
 	var written []MissedRun
@@ -92,7 +92,7 @@ func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRu
 
 // removeRunByID returns runs with any entry matching id stripped. Order is
 // not preserved (callers re-sort as needed; DetectCatchups doesn't care).
-func removeRunByID(runs []JobRun, id string) []JobRun {
+func removeRunByID(runs []Run, id string) []Run {
 	out := runs[:0]
 	for _, r := range runs {
 		if r.ID == id {
@@ -103,15 +103,15 @@ func removeRunByID(runs []JobRun, id string) []JobRun {
 	return out
 }
 
-// writeMissedRun marshals a JobRun{Status: StatusMissed, ...} for the given
+// writeMissedRun marshals a Run{Status: StatusMissed, ...} for the given
 // slot, writes it atomically (temp+rename) into runsDir, and returns the
 // in-memory record (with StartedAtTime populated) so callers can stitch it
 // into their working runs slice without re-reading the file.
-func writeMissedRun(runsDir, id string, m MissedRun) (JobRun, error) {
+func writeMissedRun(runsDir, id string, m MissedRun) (Run, error) {
 	expectedUTC := m.ExpectedAt.UTC()
-	run := JobRun{
+	run := Run{
 		ID:            id,
-		JobID:         m.AgentID,
+		AgentID:         m.AgentID,
 		ScheduleID:    nil,
 		Trigger:       "schedule",
 		StartedAt:     expectedUTC.Format(time.RFC3339Nano),
@@ -125,16 +125,16 @@ func writeMissedRun(runsDir, id string, m MissedRun) (JobRun, error) {
 	}
 	buf, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
-		return JobRun{}, fmt.Errorf("marshal miss %s: %w", id, err)
+		return Run{}, fmt.Errorf("marshal miss %s: %w", id, err)
 	}
 	full := filepath.Join(runsDir, id+".json")
 	tmp := full + ".tmp"
 	if err := os.WriteFile(tmp, buf, 0o644); err != nil {
-		return JobRun{}, fmt.Errorf("write %s: %w", tmp, err)
+		return Run{}, fmt.Errorf("write %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, full); err != nil {
 		_ = os.Remove(tmp)
-		return JobRun{}, fmt.Errorf("rename %s: %w", full, err)
+		return Run{}, fmt.Errorf("rename %s: %w", full, err)
 	}
 	return run, nil
 }

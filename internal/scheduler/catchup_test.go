@@ -9,11 +9,11 @@ import (
 // status S at time T" rather than a multi-line struct literal. Mirrors what
 // LoadRuns produces in production: both StartedAt (string, on disk) and
 // StartedAtTime (parsed, used for comparisons) are populated.
-func run(agentID string, status RunStatus, at time.Time) JobRun {
+func run(agentID string, status RunStatus, at time.Time) Run {
 	utc := at.UTC()
-	return JobRun{
+	return Run{
 		ID:            agentID + "-" + utc.Format(time.RFC3339),
-		JobID:         agentID,
+		AgentID:         agentID,
 		StartedAt:     utc.Format(time.RFC3339Nano),
 		StartedAtTime: utc,
 		Status:        status,
@@ -23,7 +23,7 @@ func run(agentID string, status RunStatus, at time.Time) JobRun {
 func TestDetectCatchups_firesWhenLatestIsMissed(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	a := hourlyAgent("ping", 0, now.Add(-48*time.Hour))
-	runs := []JobRun{
+	runs := []Run{
 		run("ping", StatusSuccess, now.Add(-2*time.Hour)),
 		run("ping", StatusMissed, now.Add(-30*time.Minute)),
 	}
@@ -56,7 +56,7 @@ func TestDetectCatchups_skipsLatestNonMissed(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			runs := []JobRun{
+			runs := []Run{
 				run("ping", StatusMissed, now.Add(-2*time.Hour)),
 				run("ping", tc.status, now.Add(-30*time.Minute)),
 			}
@@ -83,7 +83,7 @@ func TestDetectCatchups_skipsUnscheduledAgent(t *testing.T) {
 	// disk. We must not fire a catch-up after the user opted out of scheduling.
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	a := Agent{ID: "ping"} // no schedule
-	runs := []JobRun{run("ping", StatusMissed, now.Add(-30*time.Minute))}
+	runs := []Run{run("ping", StatusMissed, now.Add(-30*time.Minute))}
 	if got := DetectCatchups([]Agent{a}, runs); len(got) != 0 {
 		t.Errorf("expected 0 candidates, got %+v", got)
 	}
@@ -94,7 +94,7 @@ func TestDetectCatchups_idempotentOnceCatchupIsRunning(t *testing.T) {
 	// Next tick must see latest=running and not double-fire.
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	a := hourlyAgent("ping", 0, now.Add(-48*time.Hour))
-	runs := []JobRun{
+	runs := []Run{
 		run("ping", StatusMissed, now.Add(-30*time.Minute)),
 		run("ping", StatusRunning, now.Add(-1*time.Minute)),
 	}
@@ -108,7 +108,7 @@ func TestDetectCatchups_doesNotRetryFailedCatchup(t *testing.T) {
 	// auto-rerun — the only retry condition is "latest is missed".
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	a := hourlyAgent("ping", 0, now.Add(-48*time.Hour))
-	runs := []JobRun{
+	runs := []Run{
 		run("ping", StatusMissed, now.Add(-30*time.Minute)),
 		run("ping", StatusError, now.Add(-1*time.Minute)),
 	}
@@ -134,16 +134,16 @@ func TestDetectCatchups_sameSecondMixedTimestampFormat(t *testing.T) {
 	slot := time.Date(2026, 5, 17, 11, 0, 0, 0, time.UTC)
 	wrapperStart := slot.Add(500 * time.Millisecond)
 
-	miss := JobRun{
+	miss := Run{
 		ID:            "miss-ping",
-		JobID:         "ping",
+		AgentID:         "ping",
 		StartedAt:     slot.Format(time.RFC3339Nano), // "2026-05-17T11:00:00Z"
 		StartedAtTime: slot,
 		Status:        StatusMissed,
 	}
-	real := JobRun{
+	real := Run{
 		ID:            "real-success",
-		JobID:         "ping",
+		AgentID:         "ping",
 		StartedAt:     wrapperStart.Format("2006-01-02T15:04:05.000Z"), // "...:00.500Z"
 		StartedAtTime: wrapperStart,
 		Status:        StatusSuccess,
@@ -154,7 +154,7 @@ func TestDetectCatchups_sameSecondMixedTimestampFormat(t *testing.T) {
 		t.Fatalf("test premise broken: expected %q < %q lex", real.StartedAt, miss.StartedAt)
 	}
 
-	if got := DetectCatchups([]Agent{a}, []JobRun{miss, real}); len(got) != 0 {
+	if got := DetectCatchups([]Agent{a}, []Run{miss, real}); len(got) != 0 {
 		t.Errorf("expected 0 candidates (real wrapper later in real time despite lex inversion), got %+v", got)
 	}
 }
@@ -164,7 +164,7 @@ func TestDetectCatchups_multipleAgentsStableOrder(t *testing.T) {
 	zebra := hourlyAgent("zebra", 0, now.Add(-48*time.Hour))
 	apple := hourlyAgent("apple", 0, now.Add(-48*time.Hour))
 	mango := hourlyAgent("mango", 0, now.Add(-48*time.Hour)) // not behind
-	runs := []JobRun{
+	runs := []Run{
 		run("zebra", StatusMissed, now.Add(-30*time.Minute)),
 		run("apple", StatusMissed, now.Add(-31*time.Minute)),
 		run("mango", StatusSuccess, now.Add(-29*time.Minute)),

@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-func TestJobRunStub_shape(t *testing.T) {
-	stub := jobRunStub("r-1", "planner", "2026-01-01T00:00:00.000Z")
+func TestRunStub_shape(t *testing.T) {
+	stub := runStub("r-1", "planner", "2026-01-01T00:00:00.000Z")
 	buf, err := json.Marshal(stub)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -19,7 +19,7 @@ func TestJobRunStub_shape(t *testing.T) {
 
 	want := map[string]any{
 		"id":         "r-1",
-		"jobId":      "planner",
+		"agentId":      "planner",
 		"scheduleId": nil,
 		"trigger":    "manual",
 		"startedAt":  "2026-01-01T00:00:00.000Z",
@@ -41,8 +41,8 @@ func TestJobRunStub_shape(t *testing.T) {
 	}
 }
 
-func TestJobRunStub_usesEstimate(t *testing.T) {
-	stub := jobRunStub("r-1", "planner", "2026-01-01T00:00:00.000Z", 2031)
+func TestRunStub_usesEstimate(t *testing.T) {
+	stub := runStub("r-1", "planner", "2026-01-01T00:00:00.000Z", 2031)
 	if got := stub["estimate"]; got != int64(2031) {
 		t.Errorf("estimate = %v, want 2031", got)
 	}

@@ -68,7 +68,7 @@ type agentLocation struct {
 // the agent id so list.DefaultFilter's fuzzy matcher narrows by id.
 type agentItem struct {
 	agent   scheduler.Agent
-	lastRun scheduler.JobRun
+	lastRun scheduler.Run
 }
 
 func (a agentItem) FilterValue() string { return a.agent.ID }
@@ -202,7 +202,7 @@ type clearToastMsg struct{}
 
 const toastTTL = 5 * time.Second
 
-func newStartModel(aosHome string, scan scheduler.ScanResult, runs []scheduler.JobRun, events chan fsnotify.Event, errs chan error) startModel {
+func newStartModel(aosHome string, scan scheduler.ScanResult, runs []scheduler.Run, events chan fsnotify.Event, errs chan error) startModel {
 	// Group agents by section in scan order. ScanAgents already returns
 	// agents sorted by id; sections come from the first occurrence.
 	type group struct {
@@ -227,11 +227,11 @@ func newStartModel(aosHome string, scan scheduler.ScanResult, runs []scheduler.J
 
 	// Build the lastRun map up front so the initial render shows accurate
 	// status glyphs without waiting for the watcher.
-	latest := map[string]scheduler.JobRun{}
+	latest := map[string]scheduler.Run{}
 	for _, r := range runs {
-		cur, ok := latest[r.JobID]
+		cur, ok := latest[r.AgentID]
 		if !ok || r.StartedAtTime.After(cur.StartedAtTime) {
-			latest[r.JobID] = r
+			latest[r.AgentID] = r
 		}
 	}
 
@@ -604,10 +604,10 @@ func (m *startModel) applyMetaUpdate(agentID string, meta scheduler.AgentMeta) {
 // from list.SetItem so any side-effect (none today) is captured.
 func (m *startModel) applyRunChange(runID string) tea.Cmd {
 	r, err := scheduler.ReadRun(m.runsDir, runID)
-	if err != nil || r.JobID == "" {
+	if err != nil || r.AgentID == "" {
 		return nil
 	}
-	loc, ok := m.agentLoc[r.JobID]
+	loc, ok := m.agentLoc[r.AgentID]
 	if !ok {
 		return nil
 	}

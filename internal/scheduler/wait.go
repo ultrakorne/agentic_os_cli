@@ -22,7 +22,7 @@ var ErrWaitCanceled = errors.New("wait canceled")
 // genuinely broken record surfaces instead of looping forever.
 //
 // interval defaults to 250ms when <= 0; callers in tests can shorten it.
-func WaitForRun(ctx context.Context, runsDir, runID string, interval time.Duration) (JobRun, error) {
+func WaitForRun(ctx context.Context, runsDir, runID string, interval time.Duration) (Run, error) {
 	if interval <= 0 {
 		interval = 250 * time.Millisecond
 	}
@@ -33,14 +33,14 @@ func WaitForRun(ctx context.Context, runsDir, runID string, interval time.Durati
 		if err != nil {
 			var nf NotFoundError
 			if !errors.As(err, &nf) {
-				return JobRun{}, err
+				return Run{}, err
 			}
 		} else if run.Status == StatusSuccess || run.Status == StatusError {
 			return run, nil
 		}
 		select {
 		case <-ctx.Done():
-			return JobRun{}, ErrWaitCanceled
+			return Run{}, ErrWaitCanceled
 		case <-t.C:
 		}
 	}

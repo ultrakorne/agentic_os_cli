@@ -29,7 +29,7 @@ func writeRun(t *testing.T, dir, id, status string, exitCode *int) {
 	}
 	body := `{
   "id": "` + id + `",
-  "jobId": "planner",
+  "agentId": "planner",
   "scheduleId": null,
   "trigger": "manual",
   "startedAt": "2026-05-16T13:09:37.072Z",
@@ -161,9 +161,9 @@ func TestWaitModel_ctrlCCancels(t *testing.T) {
 func TestWaitModel_doneMsgSetsFinal(t *testing.T) {
 	m := newWaitModel(context.Background(), t.TempDir(), "r-1", "planner", time.Now(), -1)
 	exit := 0
-	run := scheduler.JobRun{
+	run := scheduler.Run{
 		ID:       "r-1",
-		JobID:    "planner",
+		AgentID:    "planner",
 		Status:   scheduler.StatusSuccess,
 		ExitCode: &exit,
 	}

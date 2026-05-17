@@ -25,7 +25,7 @@ both surfaces consistent: every `--json` branch funnels through `printJSON`
 | [`aos list`](#aos-list) | Enumerate every agent with section, schedule summary, description |
 | [`aos describe <id> [text]`](#aos-describe) | Show one agent's full record; optionally rewrite its description |
 | [`aos schedule <id> ...`](#aos-schedule) | Set or clear an agent's schedule; auto-refreshes cron |
-| [`aos run <id>`](#aos-run) | Fire a manual run; prints the `JobRun` stub (optional `--wait` blocks until done and prints `.out`) |
+| [`aos run <id>`](#aos-run) | Fire a manual run; prints the `Run` stub (optional `--wait` blocks until done and prints `.out`) |
 | [`aos runs [run-id]`](#aos-runs) | List recent runs, or show one by id (single-run prints the captured .out inline) |
 | [`aos uninstall`](#aos-uninstall) | Remove wrapper, managed crontab block, and config |
 
@@ -357,7 +357,7 @@ case.
 ## `aos run`
 
 ```
-aos run <id>                  # spawn a manual run; prints the JobRun stub and exits
+aos run <id>                  # spawn a manual run; prints the Run stub and exits
 aos run <id> --json
 aos run <id> --wait           # spawn, then block until done; prints .out on stdout
 aos run <id> --wait --json    # spawn, print stub JSON, block, then append .out
@@ -366,7 +366,7 @@ aos run <id> --wait --json    # spawn, print stub JSON, block, then append .out
 Looks up the agent by id, estimates duration from the newest completed runs
 for that agent (up to 10), mints a run id (`<unix>-<pid>-<rand><rand>`),
 spawns `wrapper.sh` detached (`setsid`) with `AGENTIC_OS_TRIGGER=manual` and
-the explicit run id as the wrapper's 5th argv, then prints a `JobRun` stub.
+the explicit run id as the wrapper's 5th argv, then prints a `Run` stub.
 The wrapper writes the final record under `<aos_home>/runs/<run-id>.json`
 once the script exits — poll for it (or watch the file) to see the result.
 
@@ -502,7 +502,7 @@ output, use `aos runs <id> --json | jq -r .output`.
   "runs": [
     {
       "id": "1778936977-29334-...",
-      "jobId": "ping",
+      "agentId": "ping",
       "scheduleId": null,
       "trigger": "manual",
       "startedAt": "2026-05-16T13:09:37.072Z",

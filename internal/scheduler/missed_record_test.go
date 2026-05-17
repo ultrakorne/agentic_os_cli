@@ -150,9 +150,9 @@ func TestRecordMissedRuns_keepsHistoricalMissAfterRealRun(t *testing.T) {
 	runID := "manual-1234"
 	endedAt := tickOne.Add(5 * time.Minute).Format(time.RFC3339Nano)
 	exit := 0
-	manual := JobRun{
+	manual := Run{
 		ID:        runID,
-		JobID:     "ping",
+		AgentID:     "ping",
 		Trigger:   "manual",
 		StartedAt: tickOne.Add(time.Minute).Format(time.RFC3339Nano),
 		EndedAt:   &endedAt,
@@ -192,7 +192,7 @@ func TestRecordMissedRuns_noScheduleNoOp(t *testing.T) {
 }
 
 // TestRecordMissedRuns_returnedRunsMatchDisk pins the contract aos tick
-// relies on: the returned []JobRun is consistent with what a fresh LoadRuns
+// relies on: the returned []Run is consistent with what a fresh LoadRuns
 // would produce, so the catch-up firing pass can chain off it without a
 // second directory walk. Specifically: newly-written miss records appear in
 // the slice with StartedAtTime populated (so DetectCatchups can compare),

@@ -1,0 +1,28 @@
+sequenceDiagram
+    participant Cron as cron daemon
+    participant Tick as aos tick
+    participant FS as runs/ + tick.log
+    participant Wrap as wrapper.sh
+
+    Cron->>Tick: invoke at tick_interval
+    Tick->>Tick: scan <aos_home>/agents/
+    Tick->>FS: LoadRuns(runs/)
+    Tick->>Tick: DetectMissed (latest uncovered slot per agent)
+
+    alt new misses found
+        Tick->>FS: delete stale miss-*.json for agent
+        Tick->>FS: write miss-<agent>-<expectedAt>.json
+    else current slot already recorded
+        Tick->>Tick: skip (idempotent)
+    end
+
+    alt catchup_enabled
+        Tick->>Tick: DetectCatchups (latest run == missed?)
+        loop per candidate
+            Tick->>Wrap: SpawnWrapperDetached (TRIGGER=catch-up)
+            Wrap-->>FS: writes <run-id>.json running → success|error
+        end
+    end
+
+    Tick->>FS: append "[tick] ..." to tick.log
+    Tick-->>Cron: exit 0 (stdout: log line or JSON summary)

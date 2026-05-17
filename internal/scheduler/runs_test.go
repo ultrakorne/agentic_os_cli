@@ -15,7 +15,7 @@ func writeRunMeta(t *testing.T, dir, id, jobID, startedAt, status string) {
 	}
 	body := fmt.Sprintf(`{
   "id": %q,
-  "jobId": %q,
+  "agentId": %q,
   "scheduleId": null,
   "trigger": "manual",
   "startedAt": %q,
@@ -38,7 +38,7 @@ func writeFinishedRunMeta(t *testing.T, dir, id, jobID, startedAt, endedAt strin
 	}
 	body := fmt.Sprintf(`{
   "id": %q,
-  "jobId": %q,
+  "agentId": %q,
   "scheduleId": null,
   "trigger": "manual",
   "startedAt": %q,
@@ -126,11 +126,11 @@ func TestReadRuns_skipsRecordsMissingRequiredFields(t *testing.T) {
 	dir := t.TempDir()
 	// id absent
 	if err := os.WriteFile(filepath.Join(dir, "x.json"),
-		[]byte(`{"jobId":"a","startedAt":"2026-01-01T00:00:00Z","status":"success"}`),
+		[]byte(`{"agentId":"a","startedAt":"2026-01-01T00:00:00Z","status":"success"}`),
 		0o644); err != nil {
 		t.Fatal(err)
 	}
-	// jobId absent
+	// agentId absent
 	if err := os.WriteFile(filepath.Join(dir, "y.json"),
 		[]byte(`{"id":"y","startedAt":"2026-01-01T00:00:00Z","status":"success"}`),
 		0o644); err != nil {
@@ -138,7 +138,7 @@ func TestReadRuns_skipsRecordsMissingRequiredFields(t *testing.T) {
 	}
 	// startedAt absent
 	if err := os.WriteFile(filepath.Join(dir, "z.json"),
-		[]byte(`{"id":"z","jobId":"a","status":"success"}`),
+		[]byte(`{"id":"z","agentId":"a","status":"success"}`),
 		0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestReadRun_parsesAndFills(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadRun: %v", err)
 	}
-	if r.ID != "r1" || r.JobID != "ping" || r.Status != "success" {
+	if r.ID != "r1" || r.AgentID != "ping" || r.Status != "success" {
 		t.Errorf("record wrong: %+v", r)
 	}
 	if r.StartedAtTime.IsZero() {

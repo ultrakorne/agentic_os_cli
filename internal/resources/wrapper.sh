@@ -70,7 +70,7 @@ import json, sys
 p, rid, jid, sid, start, trig, status, ended, ec, out_name = sys.argv[1:]
 data = {
   "id": rid,
-  "jobId": jid,
+  "agentId": jid,
   "scheduleId": sid or None,
   "trigger": trig,
   "startedAt": start,

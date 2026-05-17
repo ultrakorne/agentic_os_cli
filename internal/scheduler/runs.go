@@ -24,13 +24,12 @@ const (
 	StatusMissed RunStatus = "missed"
 )
 
-// JobRun mirrors the on-disk wrapper output and the renderer's shared/JobRun
-// type (src/shared/scheduler.ts). Optional fields use pointers so JSON
-// round-trips as `null` (matching what the wrapper writes and what the
-// renderer expects) instead of dropping or zero-defaulting them.
-type JobRun struct {
+// Run mirrors the on-disk wrapper output. Optional fields use pointers so
+// JSON round-trips as `null` (matching what the wrapper writes and what
+// downstream consumers expect) instead of dropping or zero-defaulting them.
+type Run struct {
 	ID         string    `json:"id"`
-	JobID      string    `json:"jobId"`
+	AgentID    string    `json:"agentId"`
 	ScheduleID *string   `json:"scheduleId"`
 	Trigger    string    `json:"trigger"`
 	StartedAt  string    `json:"startedAt"`
@@ -45,10 +44,10 @@ type JobRun struct {
 	StartedAtTime time.Time `json:"-"`
 }
 
-// LoadRuns reads every <runsDir>/*.json into a JobRun slice. Malformed files
+// LoadRuns reads every <runsDir>/*.json into a Run slice. Malformed files
 // are silently skipped. Order is filesystem-defined (caller sorts as needed).
 // missed.go consumes this directly; aos runs goes through ReadRuns.
-func LoadRuns(runsDir string) ([]JobRun, error) {
+func LoadRuns(runsDir string) ([]Run, error) {
 	entries, err := os.ReadDir(runsDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -56,7 +55,7 @@ func LoadRuns(runsDir string) ([]JobRun, error) {
 		}
 		return nil, err
 	}
-	out := make([]JobRun, 0, len(entries))
+	out := make([]Run, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -68,7 +67,7 @@ func LoadRuns(runsDir string) ([]JobRun, error) {
 		if err != nil {
 			continue
 		}
-		var r JobRun
+		var r Run
 		if err := json.Unmarshal(data, &r); err != nil {
 			continue
 		}
@@ -83,7 +82,7 @@ func LoadRuns(runsDir string) ([]JobRun, error) {
 }
 
 // ReadRuns is the aos runs read path: drops malformed records (missing
-// id/jobId/startedAt), optionally filters by agentID, sorts by StartedAt
+// id/agentId/startedAt), optionally filters by agentID, sorts by StartedAt
 // descending, and caps at limit. Pass limit=0 for "no limit".
 //
 // Sorting compares StartedAtTime (parsed from the JSON by LoadRuns), not the
@@ -93,17 +92,17 @@ func LoadRuns(runsDir string) ([]JobRun, error) {
 // formats with time.RFC3339Nano on a zero-subsecond expected slot, which
 // strips the fraction entirely ("Z"). ASCII '.' (46) < 'Z' (90), so a
 // same-second mixed-format collision lex-inverts.
-func ReadRuns(runsDir, agentID string, limit int) ([]JobRun, error) {
+func ReadRuns(runsDir, agentID string, limit int) ([]Run, error) {
 	all, err := LoadRuns(runsDir)
 	if err != nil {
 		return nil, err
 	}
 	out := all[:0]
 	for _, r := range all {
-		if r.ID == "" || r.JobID == "" || r.StartedAt == "" {
+		if r.ID == "" || r.AgentID == "" || r.StartedAt == "" {
 			continue
 		}
-		if agentID != "" && r.JobID != agentID {
+		if agentID != "" && r.AgentID != agentID {
 			continue
 		}
 		out = append(out, r)
@@ -152,18 +151,18 @@ func EstimateRunDuration(runsDir, agentID string, limit int) (time.Duration, boo
 }
 
 // ReadRun reads one run by id. Returns NotFoundError if the file is absent.
-func ReadRun(runsDir, runID string) (JobRun, error) {
+func ReadRun(runsDir, runID string) (Run, error) {
 	path := filepath.Join(runsDir, runID+".json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return JobRun{}, NotFoundError{ID: runID}
+			return Run{}, NotFoundError{ID: runID}
 		}
-		return JobRun{}, err
+		return Run{}, err
 	}
-	var run JobRun
+	var run Run
 	if err := json.Unmarshal(data, &run); err != nil {
-		return JobRun{}, fmt.Errorf("parse %s: %w", path, err)
+		return Run{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	if run.ID == "" {
 		run.ID = runID

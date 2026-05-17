@@ -60,7 +60,7 @@ func printJSON(v any) error {
 	return nil
 }
 
-// statusStyle returns the foreground style for a JobRun status. Unknown values
+// statusStyle returns the foreground style for a Run status. Unknown values
 // fall back to muted gray so a typo never panics in the renderer.
 func statusStyle(status string) lipgloss.Style {
 	switch strings.ToLower(status) {

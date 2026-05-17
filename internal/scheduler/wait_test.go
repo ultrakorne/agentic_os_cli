@@ -19,7 +19,7 @@ func writeTerminalRunMeta(t *testing.T, dir, id, status string, exitCode int) {
 	}
 	body := fmt.Sprintf(`{
   "id": %q,
-  "jobId": "planner",
+  "agentId": "planner",
   "scheduleId": null,
   "trigger": "manual",
   "startedAt": "2026-05-16T13:09:37.072Z",
