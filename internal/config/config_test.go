@@ -130,6 +130,43 @@ func TestEffectiveRunsHardCapDefaultsWhenUnset(t *testing.T) {
 	}
 }
 
+func TestEffectiveCatchupEnabledDefaultsToTrue(t *testing.T) {
+	tru, fls := true, false
+	cases := []struct {
+		name string
+		cfg  *Config
+		want bool
+	}{
+		{"nil config", nil, true},
+		{"zero value", &Config{}, true},
+		{"explicit true", &Config{CatchupEnabled: &tru}, true},
+		{"explicit false", &Config{CatchupEnabled: &fls}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.EffectiveCatchupEnabled(); got != tc.want {
+				t.Errorf("EffectiveCatchupEnabled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSaveLoadPreservesCatchupEnabledFalse(t *testing.T) {
+	withFakeHome(t)
+	fls := false
+	want := &Config{AosHome: "/tmp/x", CatchupEnabled: &fls}
+	if err := Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got == nil || got.CatchupEnabled == nil || *got.CatchupEnabled != false {
+		t.Errorf("Load = %+v, want CatchupEnabled=false", got)
+	}
+}
+
 func TestSaveLoadPreservesRunsHardCap(t *testing.T) {
 	withFakeHome(t)
 	want := &Config{AosHome: "/tmp/x", RunsHardCap: 500}

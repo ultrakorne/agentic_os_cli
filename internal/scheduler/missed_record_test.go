@@ -24,7 +24,7 @@ func TestRecordMissedRuns_writesOneMissPerAgent(t *testing.T) {
 	now := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
 	a := hourlyAgent("ping", 0, now.Add(-2*time.Hour))
 
-	written, err := RecordMissedRuns(home, []Agent{a}, now)
+	written, _, err := RecordMissedRuns(home, []Agent{a}, now)
 	if err != nil {
 		t.Fatalf("RecordMissedRuns: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestRecordMissedRuns_isIdempotent(t *testing.T) {
 	now := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
 	a := hourlyAgent("ping", 0, now.Add(-2*time.Hour))
 
-	if _, err := RecordMissedRuns(home, []Agent{a}, now); err != nil {
+	if _, _, err := RecordMissedRuns(home, []Agent{a}, now); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
 	// Snapshot mtime to prove the second call doesn't churn the file.
@@ -75,7 +75,7 @@ func TestRecordMissedRuns_isIdempotent(t *testing.T) {
 	// Sleep so a rewrite would yield a distinguishable mtime.
 	time.Sleep(1100 * time.Millisecond)
 
-	written, err := RecordMissedRuns(home, []Agent{a}, now)
+	written, _, err := RecordMissedRuns(home, []Agent{a}, now)
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
@@ -98,12 +98,12 @@ func TestRecordMissedRuns_replacesPreviousMissForSameAgent(t *testing.T) {
 	tickOne := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
 	a := hourlyAgent("ping", 0, tickOne.Add(-3*time.Hour))
 
-	if _, err := RecordMissedRuns(home, []Agent{a}, tickOne); err != nil {
+	if _, _, err := RecordMissedRuns(home, []Agent{a}, tickOne); err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
 
 	tickTwo := tickOne.Add(time.Hour) // 13:30 — slot 13:00 is now the latest.
-	written, err := RecordMissedRuns(home, []Agent{a}, tickTwo)
+	written, _, err := RecordMissedRuns(home, []Agent{a}, tickTwo)
 	if err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestRecordMissedRuns_keepsHistoricalMissAfterRealRun(t *testing.T) {
 	tickOne := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
 	a := hourlyAgent("ping", 0, tickOne.Add(-2*time.Hour))
 
-	if _, err := RecordMissedRuns(home, []Agent{a}, tickOne); err != nil {
+	if _, _, err := RecordMissedRuns(home, []Agent{a}, tickOne); err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
 	beforeFiles, _ := os.ReadDir(dir)
@@ -166,7 +166,7 @@ func TestRecordMissedRuns_keepsHistoricalMissAfterRealRun(t *testing.T) {
 
 	// Tick 2: no new miss should be recorded, and the old one stays.
 	tickTwo := tickOne.Add(10 * time.Minute) // 12:40 — still inside the 12:00 slot window
-	written, err := RecordMissedRuns(home, []Agent{a}, tickTwo)
+	written, _, err := RecordMissedRuns(home, []Agent{a}, tickTwo)
 	if err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
@@ -182,11 +182,58 @@ func TestRecordMissedRuns_noScheduleNoOp(t *testing.T) {
 	home, _ := runsDir(t)
 	a := Agent{ID: "unscheduled"} // no Meta.Schedule
 
-	written, err := RecordMissedRuns(home, []Agent{a}, time.Now())
+	written, _, err := RecordMissedRuns(home, []Agent{a}, time.Now())
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
 	if len(written) != 0 {
 		t.Fatalf("expected 0 misses for unscheduled agent, got %d", len(written))
+	}
+}
+
+// TestRecordMissedRuns_returnedRunsMatchDisk pins the contract aos tick
+// relies on: the returned []JobRun is consistent with what a fresh LoadRuns
+// would produce, so the catch-up firing pass can chain off it without a
+// second directory walk. Specifically: newly-written miss records appear in
+// the slice with StartedAtTime populated (so DetectCatchups can compare),
+// and stale miss records replaced this call are absent.
+func TestRecordMissedRuns_returnedRunsMatchDisk(t *testing.T) {
+	home, dir := runsDir(t)
+	tickOne := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
+	a := hourlyAgent("ping", 0, tickOne.Add(-3*time.Hour))
+
+	_, runsAfterOne, err := RecordMissedRuns(home, []Agent{a}, tickOne)
+	if err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	fromDisk, err := LoadRuns(dir)
+	if err != nil {
+		t.Fatalf("LoadRuns: %v", err)
+	}
+	if len(runsAfterOne) != len(fromDisk) {
+		t.Fatalf("returned slice len=%d, disk has %d", len(runsAfterOne), len(fromDisk))
+	}
+	if len(runsAfterOne) != 1 || runsAfterOne[0].Status != StatusMissed {
+		t.Fatalf("returned slice = %+v, want [missed]", runsAfterOne)
+	}
+	if runsAfterOne[0].StartedAtTime.IsZero() {
+		t.Errorf("StartedAtTime not populated on returned miss — DetectCatchups would skip it")
+	}
+
+	// Tick 2 replaces the slot-12 miss with a slot-13 miss. The returned
+	// slice must drop the stale entry, not just hide it.
+	tickTwo := tickOne.Add(time.Hour)
+	_, runsAfterTwo, err := RecordMissedRuns(home, []Agent{a}, tickTwo)
+	if err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if len(runsAfterTwo) != 1 {
+		t.Fatalf("expected 1 run after replacement, got %d (%+v)", len(runsAfterTwo), runsAfterTwo)
+	}
+	staleID := MissedRunID("ping", time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC))
+	for _, r := range runsAfterTwo {
+		if r.ID == staleID {
+			t.Errorf("stale miss %s still in returned slice", staleID)
+		}
 	}
 }

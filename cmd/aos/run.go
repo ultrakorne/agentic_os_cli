@@ -3,12 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"math/rand"
-	"os"
-	"os/exec"
 	"path/filepath"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -66,7 +61,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s is not executable", wrapperPath)
 	}
 
-	runID := newRunID()
+	runID := scheduler.NewRunID()
 	now := time.Now()
 	startedAt := isoMillisUTC(now)
 	estimateDur := time.Duration(-1)
@@ -78,7 +73,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 		estimateMillis = estimate.Truncate(time.Millisecond).Milliseconds()
 	}
 
-	if err := spawnWrapperDetached(wrapperPath, cfg.AosHome, agent.ID, agent.ScriptPath, runID); err != nil {
+	if err := scheduler.SpawnWrapperDetached(wrapperPath, scheduler.SpawnOpts{
+		AosHome:    cfg.AosHome,
+		AgentID:    agent.ID,
+		ScriptPath: agent.ScriptPath,
+		RunID:      runID,
+		Trigger:    "manual",
+	}); err != nil {
 		return fmt.Errorf("spawn wrapper: %w", err)
 	}
 
@@ -144,39 +145,9 @@ func estimateString(v any) string {
 	return (time.Duration(ms) * time.Millisecond).Round(100 * time.Millisecond).String()
 }
 
-// spawnWrapperDetached starts wrapper.sh in a new session so it survives this
-// process exiting. stdout/stderr/stdin default to /dev/null in os/exec when
-// left nil, decoupling the wrapper from whatever shell `aos` was launched in.
-func spawnWrapperDetached(wrapperPath, aosHome, agentID, scriptPath, runID string) error {
-	cmd := exec.Command(wrapperPath, aosHome, "", agentID, scriptPath, runID)
-	cmd.Env = append(os.Environ(), "AGENTIC_OS_TRIGGER=manual")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
-}
-
 // isoMillisUTC mirrors wrapper.sh's iso_now: millisecond-precision UTC.
 func isoMillisUTC(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
-}
-
-var (
-	runIDOnce sync.Once
-	runIDRand *rand.Rand
-)
-
-// newRunID is the engine-side analogue of wrapper.sh's fallback id format
-// (`<unix-millis>-<rand4>`). Threading a pre-generated id through the
-// wrapper's 5th argv lets the stub returned to the renderer match the file
-// name the wrapper writes. Millisecond precision keeps two rapid manual
-// runs from colliding even before the random tail.
-func newRunID() string {
-	runIDOnce.Do(func() {
-		runIDRand = rand.New(rand.NewSource(time.Now().UnixNano()))
-	})
-	return fmt.Sprintf("%d-%04x", time.Now().UnixMilli(), runIDRand.Int31()&0xffff)
 }
 
 func init() {

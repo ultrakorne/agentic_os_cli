@@ -45,6 +45,18 @@ crontab block. If a previous home was configured and points elsewhere,
 contents are relocated to the new path (rename when possible,
 copy+remove across filesystems).
 
+The config file is written with every tunable populated at its default so
+the available knobs are visible without reading docs:
+
+```toml
+aos_home = '/home/you/aos_home'
+runs_hard_cap = 2000
+catchup_enabled = true
+```
+
+Re-running `aos init` preserves user-set values for `runs_hard_cap` and
+`catchup_enabled`; only `aos_home` is updated to the new path.
+
 **Human output** (styled key/value block):
 
 ```
@@ -136,12 +148,22 @@ aos tick
 aos tick --json
 ```
 
-Invoked by cron via the managed `__tick__` line every 10 minutes. Detects
-the most-recent uncovered scheduled slot per agent and, when one exists,
-persists it as a `runs/miss-<agent>-<expectedAt>.json` record with
-`status:"missed"` so the dashboard's run-history view picks it up like any
-other run. Appends a one-line summary to `<aos_home>/tick.log`. The default
-stdout form mirrors that log line; `--json` emits a `TickSummary` record:
+Invoked by cron via the managed `__tick__` line every 10 minutes. Three
+things happen each tick, in order:
+
+1. **Detect missed slots.** For each scheduled agent, find the most-recent
+   uncovered slot ≤ now and persist it as `runs/miss-<agent>-<expectedAt>.json`
+   with `status:"missed"`.
+2. **Fire catch-ups** (unless disabled in config). For each agent whose
+   *latest* run on disk is `status:"missed"`, spawn `wrapper.sh` detached
+   with `AGENTIC_OS_TRIGGER=catch-up` and the missed slot's RFC3339 stamp
+   as `scheduleId`. The trigger condition is strict: any other status
+   (`running`, `success`, `error`) on the latest run skips the catch-up,
+   so a failed catch-up does **not** auto-retry.
+3. **Log a summary** to `<aos_home>/tick.log`.
+
+The default stdout form mirrors the log line; `--json` emits a
+`TickSummary` record:
 
 ```json
 {
@@ -149,6 +171,7 @@ stdout form mirrors that log line; `--json` emits a `TickSummary` record:
   "scripts": 2,
   "scheduled": 1,
   "missed": 0,
+  "catchups": 0,
   "crontab": "managed"
 }
 ```
@@ -160,6 +183,16 @@ replaced; only one `miss-*` file per agent exists on disk at any time. The
 deliberate granularity loss (multi-slot outages collapse to one entry) lets
 the dashboard surface "agents currently behind" as a one-row-per-agent
 banner that auto-resolves on the next real run.
+
+The `catchups` field counts wrappers actually spawned this tick. Once a
+catch-up writes its `running` record it is no longer the same agent's
+"latest = missed", so subsequent ticks don't double-fire. Catch-up runs
+appear in `aos runs` with `trigger:"catch-up"` and the missed slot's
+timestamp as `scheduleId`.
+
+To disable catch-up auto-fire, set `catchup_enabled = false` in
+`~/.config/aos/config.toml`; tick will still detect and record misses,
+but won't spawn the catch-up wrapper.
 
 The `tick.log` line format is unchanged regardless of `--json` — it's a
 separate concern from stdout.

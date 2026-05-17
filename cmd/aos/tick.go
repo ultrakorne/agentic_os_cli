@@ -36,11 +36,18 @@ var tickCmd = &cobra.Command{
 // outstanding. Most ticks emit 0; the count goes positive only when a new
 // uncovered slot is detected for an agent that didn't already have a record
 // for it.
+//
+// Catchups counts catch-up wrappers *spawned this tick* — one per agent
+// whose latest run was status="missed". The trigger condition is strictly
+// "latest is missed", so once the catch-up writes its running/success/error
+// record the agent is no longer a candidate. Off by default when
+// catchup_enabled=false in config.toml.
 type TickSummary struct {
 	Timestamp string `json:"timestamp"`
 	Scripts   int    `json:"scripts"`
 	Scheduled int    `json:"scheduled"`
 	Missed    int    `json:"missed"`
+	Catchups  int    `json:"catchups"`
 	Crontab   string `json:"crontab"`
 }
 
@@ -66,11 +73,25 @@ func runTick() error {
 	}
 
 	now := time.Now()
-	missed, missesErr := scheduler.RecordMissedRuns(cfg.AosHome, scan.Agents, now)
+	missed, runs, missesErr := scheduler.RecordMissedRuns(cfg.AosHome, scan.Agents, now)
 	if missesErr != nil {
 		// Don't fail the tick — the runs/cron side of the world is still
 		// authoritative even if a miss record didn't land this round.
 		fmt.Fprintf(os.Stderr, "[tick] record missed runs: %v\n", missesErr)
+	}
+
+	catchups := 0
+	if cfg.EffectiveCatchupEnabled() {
+		// Reuse the runs slice RecordMissedRuns returned — it already
+		// reflects this tick's writes, so fireCatchups doesn't need a
+		// second LoadRuns of the (potentially 2000-entry) runs/ dir.
+		fired, err := fireCatchups(cfg.AosHome, scan.Agents, runs)
+		if err != nil {
+			// Spawn failures don't fail the tick — same posture as miss
+			// recording. Operators see them on stderr; the next tick retries.
+			fmt.Fprintf(os.Stderr, "[tick] fire catch-ups: %v\n", err)
+		}
+		catchups = fired
 	}
 
 	state := crontabState(cfg.AosHome, scan.Agents)
@@ -79,13 +100,14 @@ func runTick() error {
 		Scripts:   len(scan.Agents),
 		Scheduled: scheduled,
 		Missed:    len(missed),
+		Catchups:  catchups,
 		Crontab:   state,
 	}
 
 	// The on-disk log keeps its historical bracketed shape; tail consumers
 	// (the dashboard's tick.log viewer, ad-hoc grep) parse that line.
-	logLine := fmt.Sprintf("[tick] %s scripts=%d scheduled=%d missed=%d crontab=%s\n",
-		summary.Timestamp, summary.Scripts, summary.Scheduled, summary.Missed, summary.Crontab)
+	logLine := fmt.Sprintf("[tick] %s scripts=%d scheduled=%d missed=%d catchups=%d crontab=%s\n",
+		summary.Timestamp, summary.Scripts, summary.Scheduled, summary.Missed, summary.Catchups, summary.Crontab)
 	if err := appendLog(filepath.Join(cfg.AosHome, "tick.log"), logLine); err != nil {
 		return fmt.Errorf("write tick.log: %w", err)
 	}
@@ -97,6 +119,41 @@ func runTick() error {
 	// the operator wants the same string they'd grep for in tick.log.
 	fmt.Print(logLine)
 	return nil
+}
+
+// fireCatchups inspects per-agent latest run state and spawns wrapper.sh with
+// AGENTIC_OS_TRIGGER=catch-up for every agent whose latest run is missed.
+// Returns the number of wrappers actually spawned. Each spawn failure is
+// logged to stderr but does not short-circuit the loop — one broken agent
+// shouldn't block catch-ups for siblings.
+//
+// `runs` is the post-RecordMissedRuns view of the runs/ directory — pass it
+// through from tick so a 2000-file directory isn't walked twice per tick.
+func fireCatchups(aosHome string, agents []scheduler.Agent, runs []scheduler.JobRun) (int, error) {
+	wrapperPath := filepath.Join(aosHome, "wrapper.sh")
+	if !runtime.FileExists(wrapperPath) || !runtime.IsExecutable(wrapperPath) {
+		// Mirrors aos run's posture: without a usable wrapper we can't spawn
+		// anything. Treat as a soft error so the tick's other work still lands.
+		return 0, fmt.Errorf("%s missing or not executable", wrapperPath)
+	}
+	candidates := scheduler.DetectCatchups(agents, runs)
+	fired := 0
+	for _, c := range candidates {
+		err := scheduler.SpawnWrapperDetached(wrapperPath, scheduler.SpawnOpts{
+			AosHome:    aosHome,
+			ScheduleID: c.MissedSlot,
+			AgentID:    c.AgentID,
+			ScriptPath: c.ScriptPath,
+			RunID:      scheduler.NewRunID(),
+			Trigger:    "catch-up",
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[tick] catch-up %s: %v\n", c.AgentID, err)
+			continue
+		}
+		fired++
+	}
+	return fired, nil
 }
 
 // crontabState returns one of: managed | empty | conflict | drift | error(<msg>).

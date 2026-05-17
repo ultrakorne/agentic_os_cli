@@ -30,13 +30,18 @@ func MissedRunID(agentID string, expectedAt time.Time) string {
 // the dashboard show "agents currently behind" as a one-row-per-agent
 // banner that auto-resolves on the next real run.
 //
-// Returns the slice of misses actually written this call (zero when every
-// detected miss already has a matching file on disk). aos tick / aos
-// refresh surface the count as their "newly recorded this tick" summary.
-func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRun, error) {
+// Returns:
+//   - written: misses actually written this call (zero when every detected
+//     miss already has a matching file on disk). aos tick / aos refresh
+//     surface the count as their "newly recorded this tick" summary.
+//   - updated: the post-write []JobRun. Same shape as a fresh LoadRuns
+//     would produce — stale miss records removed, new ones appended with
+//     StartedAtTime populated — so the caller can chain into a follow-up
+//     pass (DetectCatchups in aos tick) without re-reading the directory.
+func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRun, []JobRun, error) {
 	runsDir := filepath.Join(aosHome, "runs")
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
-		return nil, fmt.Errorf("mkdir runs: %w", err)
+		return nil, nil, fmt.Errorf("mkdir runs: %w", err)
 	}
 
 	// Surface a LoadRuns error rather than swallowing — if the runs dir is
@@ -45,11 +50,11 @@ func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRu
 	// internally, so a clean install with no runs/ yet still returns (nil, nil).
 	runs, err := LoadRuns(runsDir)
 	if err != nil {
-		return nil, fmt.Errorf("load runs: %w", err)
+		return nil, nil, fmt.Errorf("load runs: %w", err)
 	}
 	detected := DetectMissed(agents, runs, DetectOpts{Now: now})
 	if len(detected) == 0 {
-		return nil, nil
+		return nil, runs, nil
 	}
 
 	// Index existing miss records by agent so we can identify both "already
@@ -71,46 +76,65 @@ func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRu
 		}
 		for _, id := range existingByAgent[m.AgentID] {
 			if err := os.Remove(filepath.Join(runsDir, id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return written, fmt.Errorf("remove stale miss %s: %w", id, err)
+				return written, runs, fmt.Errorf("remove stale miss %s: %w", id, err)
 			}
+			runs = removeRunByID(runs, id)
 		}
-		if err := writeMissedRun(runsDir, newID, m); err != nil {
-			return written, err
+		newRun, err := writeMissedRun(runsDir, newID, m)
+		if err != nil {
+			return written, runs, err
 		}
+		runs = append(runs, newRun)
 		written = append(written, m)
 	}
-	return written, nil
+	return written, runs, nil
+}
+
+// removeRunByID returns runs with any entry matching id stripped. Order is
+// not preserved (callers re-sort as needed; DetectCatchups doesn't care).
+func removeRunByID(runs []JobRun, id string) []JobRun {
+	out := runs[:0]
+	for _, r := range runs {
+		if r.ID == id {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // writeMissedRun marshals a JobRun{Status: StatusMissed, ...} for the given
-// slot and writes it atomically (temp+rename) into runsDir.
-func writeMissedRun(runsDir, id string, m MissedRun) error {
-	expected := m.ExpectedAt.UTC().Format(time.RFC3339Nano)
+// slot, writes it atomically (temp+rename) into runsDir, and returns the
+// in-memory record (with StartedAtTime populated) so callers can stitch it
+// into their working runs slice without re-reading the file.
+func writeMissedRun(runsDir, id string, m MissedRun) (JobRun, error) {
+	expectedUTC := m.ExpectedAt.UTC()
 	run := JobRun{
-		ID:         id,
-		JobID:      m.AgentID,
-		ScheduleID: nil,
-		Trigger:    "schedule",
-		StartedAt:  expected,
-		EndedAt:    nil,
-		Status:     StatusMissed,
-		Output:     "",
-		Error:      nil,
-		ExitCode:   nil,
-		OutputPath: nil,
+		ID:            id,
+		JobID:         m.AgentID,
+		ScheduleID:    nil,
+		Trigger:       "schedule",
+		StartedAt:     expectedUTC.Format(time.RFC3339Nano),
+		StartedAtTime: expectedUTC,
+		EndedAt:       nil,
+		Status:        StatusMissed,
+		Output:        "",
+		Error:         nil,
+		ExitCode:      nil,
+		OutputPath:    nil,
 	}
 	buf, err := json.MarshalIndent(run, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal miss %s: %w", id, err)
+		return JobRun{}, fmt.Errorf("marshal miss %s: %w", id, err)
 	}
 	full := filepath.Join(runsDir, id+".json")
 	tmp := full + ".tmp"
 	if err := os.WriteFile(tmp, buf, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", tmp, err)
+		return JobRun{}, fmt.Errorf("write %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, full); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("rename %s: %w", full, err)
+		return JobRun{}, fmt.Errorf("rename %s: %w", full, err)
 	}
-	return nil
+	return run, nil
 }

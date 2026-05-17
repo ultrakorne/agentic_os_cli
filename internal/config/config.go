@@ -20,6 +20,11 @@ type Config struct {
 	// RunsHardCap is the on-disk runs cap. Zero or negative values fall back
 	// to DefaultRunsHardCap when consumed via EffectiveRunsHardCap.
 	RunsHardCap int `toml:"runs_hard_cap"`
+	// CatchupEnabled controls whether `aos tick` auto-fires a catch-up run
+	// for agents whose latest run is status="missed". Pointer so absence in
+	// the TOML (the common case) is distinguishable from an explicit
+	// `catchup_enabled = false`; consume via EffectiveCatchupEnabled.
+	CatchupEnabled *bool `toml:"catchup_enabled,omitempty"`
 }
 
 // EffectiveRunsHardCap returns the configured cap or DefaultRunsHardCap when
@@ -30,6 +35,16 @@ func (c *Config) EffectiveRunsHardCap() int {
 		return DefaultRunsHardCap
 	}
 	return c.RunsHardCap
+}
+
+// EffectiveCatchupEnabled returns the configured value or true when unset.
+// Centralizing the fallback keeps the TOML free of an explicit default while
+// letting users opt out with `catchup_enabled = false`.
+func (c *Config) EffectiveCatchupEnabled() bool {
+	if c == nil || c.CatchupEnabled == nil {
+		return true
+	}
+	return *c.CatchupEnabled
 }
 
 func Dir() (string, error) {

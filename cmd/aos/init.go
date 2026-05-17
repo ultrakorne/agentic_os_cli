@@ -68,7 +68,7 @@ func initFunc(cmd *cobra.Command, args []string) {
 		fail("%v", err)
 	}
 
-	if err := config.Save(&config.Config{AosHome: target}); err != nil {
+	if err := config.Save(mergeInitConfig(existing, target)); err != nil {
 		fail("write config: %v", err)
 	}
 
@@ -89,6 +89,28 @@ func initFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	printInitHuman(mode, target, wrapperState, refresh)
+}
+
+// mergeInitConfig produces the config record `aos init` should write: it
+// preserves user-set values from `existing` while updating AosHome and
+// materializing defaults for any unset tunables. Writing defaults explicitly
+// (instead of relying on the Effective* fallbacks) makes the available knobs
+// discoverable — a user opening config.toml can see `catchup_enabled = true`
+// and `runs_hard_cap = 2000` rather than guessing what's tunable.
+func mergeInitConfig(existing *config.Config, target string) *config.Config {
+	cfg := &config.Config{}
+	if existing != nil {
+		*cfg = *existing
+	}
+	cfg.AosHome = target
+	if cfg.RunsHardCap <= 0 {
+		cfg.RunsHardCap = config.DefaultRunsHardCap
+	}
+	if cfg.CatchupEnabled == nil {
+		t := true
+		cfg.CatchupEnabled = &t
+	}
+	return cfg
 }
 
 // printInitHuman emits a small key/value block plus the refresh summary so

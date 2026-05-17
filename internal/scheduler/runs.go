@@ -84,8 +84,15 @@ func LoadRuns(runsDir string) ([]JobRun, error) {
 
 // ReadRuns is the aos runs read path: drops malformed records (missing
 // id/jobId/startedAt), optionally filters by agentID, sorts by StartedAt
-// descending (ISO-8601 sorts chronologically as a string, so plain string
-// compare is correct), and caps at limit. Pass limit=0 for "no limit".
+// descending, and caps at limit. Pass limit=0 for "no limit".
+//
+// Sorting compares StartedAtTime (parsed from the JSON by LoadRuns), not the
+// raw string. ISO-8601 *does* sort chronologically as a string when the
+// subsecond format is uniform — but our writers aren't uniform. wrapper.sh
+// carries ms (".123Z"); aos run forces 3-digit ms (".000Z"); a miss record
+// formats with time.RFC3339Nano on a zero-subsecond expected slot, which
+// strips the fraction entirely ("Z"). ASCII '.' (46) < 'Z' (90), so a
+// same-second mixed-format collision lex-inverts.
 func ReadRuns(runsDir, agentID string, limit int) ([]JobRun, error) {
 	all, err := LoadRuns(runsDir)
 	if err != nil {
@@ -102,7 +109,7 @@ func ReadRuns(runsDir, agentID string, limit int) ([]JobRun, error) {
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartedAt > out[j].StartedAt
+		return out[i].StartedAtTime.After(out[j].StartedAtTime)
 	})
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]

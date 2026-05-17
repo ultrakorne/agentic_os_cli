@@ -145,7 +145,7 @@ func RunRefresh() (RefreshSummary, error) {
 	// Record any newly-detected missed slots as runs/miss-*.json so the
 	// dashboard sees them in the run history. Failure is non-fatal — the
 	// cron block is still the more important thing to reconcile.
-	if _, err := scheduler.RecordMissedRuns(cfg.AosHome, scan.Agents, time.Now()); err != nil {
+	if _, _, err := scheduler.RecordMissedRuns(cfg.AosHome, scan.Agents, time.Now()); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: %v\n", err)
 	}
 
