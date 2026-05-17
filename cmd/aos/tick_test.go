@@ -98,11 +98,12 @@ func TestFireCatchups_spawnsForMissedLatest(t *testing.T) {
 		},
 	}}
 
-	runs, err := scheduler.LoadRuns(filepath.Join(aosHome, "runs"))
+	store := scheduler.NewFileRunStore(aosHome)
+	runs, err := store.Load()
 	if err != nil {
-		t.Fatalf("LoadRuns: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
-	fired, err := fireCatchups(aosHome, agents, runs)
+	fired, err := fireCatchups(aosHome, store, agents, runs)
 	if err != nil {
 		t.Fatalf("fireCatchups: %v", err)
 	}
@@ -161,11 +162,12 @@ func TestFireCatchups_noopWhenLatestIsCompleted(t *testing.T) {
 		},
 	}}
 
-	runs, err := scheduler.LoadRuns(runsDir)
+	store := scheduler.NewFileRunStore(aosHome)
+	runs, err := store.Load()
 	if err != nil {
-		t.Fatalf("LoadRuns: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
-	fired, err := fireCatchups(aosHome, agents, runs)
+	fired, err := fireCatchups(aosHome, store, agents, runs)
 	if err != nil {
 		t.Fatalf("fireCatchups: %v", err)
 	}
@@ -187,7 +189,7 @@ func TestFireCatchups_missingWrapperReportsError(t *testing.T) {
 	}
 	// No wrapper.sh on disk.
 
-	if _, err := fireCatchups(aosHome, nil, nil); err == nil {
+	if _, err := fireCatchups(aosHome, scheduler.NewFileRunStore(aosHome), nil, nil); err == nil {
 		t.Error("fireCatchups returned nil error despite missing wrapper")
 	}
 }

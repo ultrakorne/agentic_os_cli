@@ -11,9 +11,9 @@ import (
 // this from a missing run record via errors.Is.
 var ErrWaitCanceled = errors.New("wait canceled")
 
-// WaitForRun polls <runsDir>/<runID>.json until the on-disk record reports a
-// terminal status (StatusSuccess or StatusError), the context is canceled, or
-// a non-recoverable read error occurs.
+// WaitForRun polls runID until the on-disk record reports a terminal
+// status (StatusSuccess or StatusError), the context is canceled, or a
+// non-recoverable read error occurs.
 //
 // The wrapper writes the record atomically (temp+rename), but the file does
 // not exist for the first hundred milliseconds or so after spawn — wait paths
@@ -22,14 +22,14 @@ var ErrWaitCanceled = errors.New("wait canceled")
 // genuinely broken record surfaces instead of looping forever.
 //
 // interval defaults to 250ms when <= 0; callers in tests can shorten it.
-func WaitForRun(ctx context.Context, runsDir, runID string, interval time.Duration) (Run, error) {
+func WaitForRun(ctx context.Context, store *FileRunStore, runID string, interval time.Duration) (Run, error) {
 	if interval <= 0 {
 		interval = 250 * time.Millisecond
 	}
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		run, err := ReadRun(runsDir, runID)
+		run, err := store.Get(runID)
 		if err != nil {
 			var nf NotFoundError
 			if !errors.As(err, &nf) {

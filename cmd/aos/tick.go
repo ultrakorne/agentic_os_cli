@@ -84,8 +84,9 @@ func runTick() error {
 	if cfg.EffectiveCatchupEnabled() {
 		// Reuse the runs slice RecordMissedRuns returned — it already
 		// reflects this tick's writes, so fireCatchups doesn't need a
-		// second LoadRuns of the (potentially 2000-entry) runs/ dir.
-		fired, err := fireCatchups(cfg.AosHome, scan.Agents, runs)
+		// second load of the (potentially 2000-entry) runs/ dir.
+		store := scheduler.NewFileRunStore(cfg.AosHome)
+		fired, err := fireCatchups(cfg.AosHome, store, scan.Agents, runs)
 		if err != nil {
 			// Spawn failures don't fail the tick — same posture as miss
 			// recording. Operators see them on stderr; the next tick retries.
@@ -136,7 +137,7 @@ func runTick() error {
 //
 // `runs` is the post-RecordMissedRuns view of the runs/ directory — pass it
 // through from tick so a 2000-file directory isn't walked twice per tick.
-func fireCatchups(aosHome string, agents []scheduler.Agent, runs []scheduler.Run) (int, error) {
+func fireCatchups(aosHome string, store *scheduler.FileRunStore, agents []scheduler.Agent, runs []scheduler.Run) (int, error) {
 	wrapperPath := filepath.Join(aosHome, "wrapper.sh")
 	if !runtime.FileExists(wrapperPath) || !runtime.IsExecutable(wrapperPath) {
 		// Mirrors aos run's posture: without a usable wrapper we can't spawn
@@ -151,7 +152,7 @@ func fireCatchups(aosHome string, agents []scheduler.Agent, runs []scheduler.Run
 			ScheduleID: c.MissedSlot,
 			AgentID:    c.AgentID,
 			ScriptPath: c.ScriptPath,
-			RunID:      scheduler.NewRunID(),
+			RunID:      store.NewID(),
 			Trigger:    "catch-up",
 		})
 		if err != nil {

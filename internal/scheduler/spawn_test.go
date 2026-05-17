@@ -10,13 +10,14 @@ import (
 )
 
 func TestNewRunID_isUnique(t *testing.T) {
-	a := NewRunID()
-	b := NewRunID()
+	store := NewFileRunStoreFromDir(t.TempDir())
+	a := store.NewID()
+	b := store.NewID()
 	if a == b {
-		t.Fatalf("NewRunID returned the same value twice: %s", a)
+		t.Fatalf("NewID returned the same value twice: %s", a)
 	}
 	if !strings.Contains(a, "-") {
-		t.Errorf("NewRunID format unexpected: %q", a)
+		t.Errorf("NewID format unexpected: %q", a)
 	}
 }
 

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"testing"
-	"time"
 )
 
 func TestRunStub_shape(t *testing.T) {
@@ -48,11 +47,4 @@ func TestRunStub_usesEstimate(t *testing.T) {
 	}
 }
 
-func TestIsoMillisUTC_format(t *testing.T) {
-	ts, _ := time.Parse(time.RFC3339Nano, "2026-05-16T14:30:25.123456789Z")
-	got := isoMillisUTC(ts)
-	if got != "2026-05-16T14:30:25.123Z" {
-		t.Errorf("isoMillisUTC = %q, want 2026-05-16T14:30:25.123Z", got)
-	}
-}
 

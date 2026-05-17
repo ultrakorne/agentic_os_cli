@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -42,19 +41,19 @@ func runRunsCmd(cmd *cobra.Command, args []string) error {
 	if cfg == nil || cfg.AosHome == "" {
 		return errors.New("aos not initialized — run `aos init <path>` first")
 	}
-	runsDir := filepath.Join(cfg.AosHome, "runs")
+	store := scheduler.NewFileRunStore(cfg.AosHome)
 
 	if len(args) == 1 {
-		return showOneRun(runsDir, args[0])
+		return showOneRun(store, args[0])
 	}
-	return listAllRuns(runsDir)
+	return listAllRuns(store)
 }
 
-func listAllRuns(runsDir string) error {
+func listAllRuns(store *scheduler.FileRunStore) error {
 	// Pull the full filtered set so the human view can report
 	// "shown of total"; the JSON branch still honors --limit to keep the
 	// existing contract with scripted consumers.
-	all, err := scheduler.ReadRuns(runsDir, runsAgentID, 0)
+	all, err := store.List(scheduler.Filter{AgentID: runsAgentID})
 	if err != nil {
 		return fmt.Errorf("read runs: %w", err)
 	}
@@ -68,15 +67,15 @@ func listAllRuns(runsDir string) error {
 	return printRunsHuman(shown, len(all))
 }
 
-func showOneRun(runsDir, runID string) error {
-	run, err := scheduler.ReadRun(runsDir, runID)
+func showOneRun(store *scheduler.FileRunStore, runID string) error {
+	run, err := store.Get(runID)
 	if err != nil {
 		return err
 	}
 	// The wrapper writes the captured stdout/stderr to a sibling .out file,
 	// not into the .json record. Merge it here so both human and JSON consumers
 	// see the content without an extra flag.
-	if out, err := scheduler.ReadRunOutput(runsDir, runID); err == nil && len(out) > 0 {
+	if out, err := store.Output(runID); err == nil && len(out) > 0 {
 		run.Output = string(out)
 	}
 	if JSONOutput() {

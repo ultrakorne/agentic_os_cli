@@ -18,8 +18,6 @@ go test ./...               # run all tests
 go vet ./...                # static checks
 ```
 
-Install procedure for end users lives in `README.md`.
-
 ## Output: humans vs. clients
 
 Every verb has two output modes, and **every new verb must implement both**:

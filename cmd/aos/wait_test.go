@@ -45,6 +45,13 @@ func writeRun(t *testing.T, dir, id, status string, exitCode *int) {
 	}
 }
 
+// storeAt builds a FileRunStore over the given runs dir. The wait flow's
+// tests all parametrize a temp directory; the store wraps it the same way
+// the wait command does at runtime.
+func storeAt(dir string) *scheduler.FileRunStore {
+	return scheduler.NewFileRunStoreFromDir(dir)
+}
+
 // TestFinalizeRun_successWritesOutput: a successful run prints its .out to
 // the supplied writer and returns nil.
 func TestFinalizeRun_successWritesOutput(t *testing.T) {
@@ -54,12 +61,13 @@ func TestFinalizeRun_successWritesOutput(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "r-1.out"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatalf("write .out: %v", err)
 	}
-	run, err := scheduler.ReadRun(dir, "r-1")
+	store := storeAt(dir)
+	run, err := store.Get("r-1")
 	if err != nil {
-		t.Fatalf("ReadRun: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := finalizeRun(dir, "r-1", run, &buf); err != nil {
+	if err := finalizeRun(store, "r-1", run, &buf); err != nil {
 		t.Fatalf("finalizeRun: %v", err)
 	}
 	if buf.String() != "hello\n" {
@@ -77,12 +85,13 @@ func TestFinalizeRun_failurePrintsOutputThenErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "r-1.out"), []byte("boom\n"), 0o644); err != nil {
 		t.Fatalf("write .out: %v", err)
 	}
-	run, err := scheduler.ReadRun(dir, "r-1")
+	store := storeAt(dir)
+	run, err := store.Get("r-1")
 	if err != nil {
-		t.Fatalf("ReadRun: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
 	var buf bytes.Buffer
-	err = finalizeRun(dir, "r-1", run, &buf)
+	err = finalizeRun(store, "r-1", run, &buf)
 	if err == nil {
 		t.Fatalf("finalizeRun returned nil, want error")
 	}
@@ -101,12 +110,13 @@ func TestFinalizeRun_successNonzeroExitErrors(t *testing.T) {
 	dir := t.TempDir()
 	exit := 7
 	writeRun(t, dir, "r-1", "success", &exit)
-	run, err := scheduler.ReadRun(dir, "r-1")
+	store := storeAt(dir)
+	run, err := store.Get("r-1")
 	if err != nil {
-		t.Fatalf("ReadRun: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
 	var buf bytes.Buffer
-	err = finalizeRun(dir, "r-1", run, &buf)
+	err = finalizeRun(store, "r-1", run, &buf)
 	if err == nil {
 		t.Fatalf("expected non-nil error for exit 7")
 	}
@@ -122,12 +132,13 @@ func TestFinalizeRun_missingOutFile(t *testing.T) {
 	dir := t.TempDir()
 	exit := 0
 	writeRun(t, dir, "r-1", "success", &exit)
-	run, err := scheduler.ReadRun(dir, "r-1")
+	store := storeAt(dir)
+	run, err := store.Get("r-1")
 	if err != nil {
-		t.Fatalf("ReadRun: %v", err)
+		t.Fatalf("Get: %v", err)
 	}
 	var buf bytes.Buffer
-	if err := finalizeRun(dir, "r-1", run, &buf); err != nil {
+	if err := finalizeRun(store, "r-1", run, &buf); err != nil {
 		t.Fatalf("finalizeRun: %v", err)
 	}
 	if buf.Len() != 0 {
@@ -140,7 +151,7 @@ func TestFinalizeRun_missingOutFile(t *testing.T) {
 // the wait flow's caller can tell a user cancel apart from completion.
 func TestWaitModel_ctrlCCancels(t *testing.T) {
 	dir := t.TempDir()
-	m := newWaitModel(context.Background(), dir, "r-1", "planner", time.Now(), -1)
+	m := newWaitModel(context.Background(), storeAt(dir), "r-1", "planner", time.Now(), -1)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	wm, ok := updated.(waitModel)
 	if !ok {
@@ -159,7 +170,7 @@ func TestWaitModel_ctrlCCancels(t *testing.T) {
 // TestWaitModel_doneMsgSetsFinal: a successful waitDoneMsg stores the run
 // record and asks the program to quit.
 func TestWaitModel_doneMsgSetsFinal(t *testing.T) {
-	m := newWaitModel(context.Background(), t.TempDir(), "r-1", "planner", time.Now(), -1)
+	m := newWaitModel(context.Background(), storeAt(t.TempDir()), "r-1", "planner", time.Now(), -1)
 	exit := 0
 	run := scheduler.Run{
 		ID:       "r-1",
@@ -184,7 +195,7 @@ func TestWaitModel_doneMsgSetsFinal(t *testing.T) {
 // returns ErrWaitCanceled when ctx is canceled; the model must translate
 // that to its own canceled flag.
 func TestWaitModel_doneMsgWithCancelErrSetsCanceled(t *testing.T) {
-	m := newWaitModel(context.Background(), t.TempDir(), "r-1", "planner", time.Now(), -1)
+	m := newWaitModel(context.Background(), storeAt(t.TempDir()), "r-1", "planner", time.Now(), -1)
 	updated, _ := m.Update(waitDoneMsg{err: scheduler.ErrWaitCanceled})
 	wm := updated.(waitModel)
 	if !wm.canceled {
@@ -198,7 +209,7 @@ func TestWaitModel_doneMsgWithCancelErrSetsCanceled(t *testing.T) {
 // TestWaitModel_doneMsgWithRealErrIsKept: a non-cancel error from the
 // poller is forwarded so the caller can return it from waitFlow.
 func TestWaitModel_doneMsgWithRealErrIsKept(t *testing.T) {
-	m := newWaitModel(context.Background(), t.TempDir(), "r-1", "planner", time.Now(), -1)
+	m := newWaitModel(context.Background(), storeAt(t.TempDir()), "r-1", "planner", time.Now(), -1)
 	real := errors.New("disk on fire")
 	updated, _ := m.Update(waitDoneMsg{err: real})
 	wm := updated.(waitModel)

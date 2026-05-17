@@ -36,11 +36,11 @@ func TestRecordMissedRuns_writesOneMissPerAgent(t *testing.T) {
 		t.Fatalf("expected 1 file on disk, got %d (%v)", len(files), files)
 	}
 
-	// Round-trip: ReadRuns should surface the miss with StatusMissed and
+	// Round-trip: store.List should surface the miss with StatusMissed and
 	// the expected slot in startedAt.
-	runs, err := ReadRuns(dir, "", 0)
+	runs, err := NewFileRunStoreFromDir(dir).List(Filter{})
 	if err != nil {
-		t.Fatalf("ReadRuns: %v", err)
+		t.Fatalf("List: %v", err)
 	}
 	if len(runs) != 1 || runs[0].Status != StatusMissed {
 		t.Fatalf("ReadRuns: %+v", runs)
@@ -206,9 +206,9 @@ func TestRecordMissedRuns_returnedRunsMatchDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
-	fromDisk, err := LoadRuns(dir)
+	fromDisk, err := NewFileRunStoreFromDir(dir).Load()
 	if err != nil {
-		t.Fatalf("LoadRuns: %v", err)
+		t.Fatalf("Load: %v", err)
 	}
 	if len(runsAfterOne) != len(fromDisk) {
 		t.Fatalf("returned slice len=%d, disk has %d", len(runsAfterOne), len(fromDisk))

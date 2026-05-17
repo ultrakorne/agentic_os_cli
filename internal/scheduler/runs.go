@@ -1,15 +1,6 @@
 package scheduler
 
-import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-)
+import "time"
 
 type RunStatus string
 
@@ -27,6 +18,10 @@ const (
 // Run mirrors the on-disk wrapper output. Optional fields use pointers so
 // JSON round-trips as `null` (matching what the wrapper writes and what
 // downstream consumers expect) instead of dropping or zero-defaulting them.
+//
+// Reads and writes go through FileRunStore (run_store.go); this file only
+// defines the data type so the missed/catchup detectors can reference Run
+// without an import cycle.
 type Run struct {
 	ID         string    `json:"id"`
 	AgentID    string    `json:"agentId"`
@@ -42,158 +37,4 @@ type Run struct {
 
 	// derived
 	StartedAtTime time.Time `json:"-"`
-}
-
-// LoadRuns reads every <runsDir>/*.json into a Run slice. Malformed files
-// are silently skipped. Order is filesystem-defined (caller sorts as needed).
-// missed.go consumes this directly; aos runs goes through ReadRuns.
-func LoadRuns(runsDir string) ([]Run, error) {
-	entries, err := os.ReadDir(runsDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	out := make([]Run, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(runsDir, e.Name()))
-		if err != nil {
-			continue
-		}
-		var r Run
-		if err := json.Unmarshal(data, &r); err != nil {
-			continue
-		}
-		if r.StartedAt != "" {
-			if t, err := time.Parse(time.RFC3339Nano, r.StartedAt); err == nil {
-				r.StartedAtTime = t
-			}
-		}
-		out = append(out, r)
-	}
-	return out, nil
-}
-
-// ReadRuns is the aos runs read path: drops malformed records (missing
-// id/agentId/startedAt), optionally filters by agentID, sorts by StartedAt
-// descending, and caps at limit. Pass limit=0 for "no limit".
-//
-// Sorting compares StartedAtTime (parsed from the JSON by LoadRuns), not the
-// raw string. ISO-8601 *does* sort chronologically as a string when the
-// subsecond format is uniform — but our writers aren't uniform. wrapper.sh
-// carries ms (".123Z"); aos run forces 3-digit ms (".000Z"); a miss record
-// formats with time.RFC3339Nano on a zero-subsecond expected slot, which
-// strips the fraction entirely ("Z"). ASCII '.' (46) < 'Z' (90), so a
-// same-second mixed-format collision lex-inverts.
-func ReadRuns(runsDir, agentID string, limit int) ([]Run, error) {
-	all, err := LoadRuns(runsDir)
-	if err != nil {
-		return nil, err
-	}
-	out := all[:0]
-	for _, r := range all {
-		if r.ID == "" || r.AgentID == "" || r.StartedAt == "" {
-			continue
-		}
-		if agentID != "" && r.AgentID != agentID {
-			continue
-		}
-		out = append(out, r)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].StartedAtTime.After(out[j].StartedAtTime)
-	})
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
-// EstimateRunDuration averages the elapsed time of the newest completed runs
-// for agentID, capped at limit. Runs without a parseable endedAt are ignored.
-func EstimateRunDuration(runsDir, agentID string, limit int) (time.Duration, bool, error) {
-	runs, err := ReadRuns(runsDir, agentID, 0)
-	if err != nil {
-		return 0, false, err
-	}
-	var total time.Duration
-	count := 0
-	for _, r := range runs {
-		if limit > 0 && count >= limit {
-			break
-		}
-		if r.EndedAt == nil || *r.EndedAt == "" {
-			continue
-		}
-		start, err1 := time.Parse(time.RFC3339Nano, r.StartedAt)
-		end, err2 := time.Parse(time.RFC3339Nano, *r.EndedAt)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		elapsed := end.Sub(start)
-		if elapsed < 0 {
-			continue
-		}
-		total += elapsed
-		count++
-	}
-	if count == 0 {
-		return 0, false, nil
-	}
-	return total / time.Duration(count), true, nil
-}
-
-// ReadRun reads one run by id. Returns NotFoundError if the file is absent.
-func ReadRun(runsDir, runID string) (Run, error) {
-	path := filepath.Join(runsDir, runID+".json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Run{}, NotFoundError{ID: runID}
-		}
-		return Run{}, err
-	}
-	var run Run
-	if err := json.Unmarshal(data, &run); err != nil {
-		return Run{}, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if run.ID == "" {
-		run.ID = runID
-	}
-	if run.StartedAt != "" {
-		if t, perr := time.Parse(time.RFC3339Nano, run.StartedAt); perr == nil {
-			run.StartedAtTime = t
-		}
-	}
-	return run, nil
-}
-
-// ReadRunOutput reads the .out file for runID. Resolves the actual filename
-// from the run's OutputPath when set, falling back to "<runID>.out". Returns
-// (nil, nil) when the run exists but the .out file is absent — running runs
-// and runs that produced no output both legitimately lack a .out file.
-func ReadRunOutput(runsDir, runID string) ([]byte, error) {
-	run, err := ReadRun(runsDir, runID)
-	if err != nil {
-		return nil, err
-	}
-	name := runID + ".out"
-	if run.OutputPath != nil && *run.OutputPath != "" {
-		name = *run.OutputPath
-	}
-	data, err := os.ReadFile(filepath.Join(runsDir, name))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return data, nil
 }

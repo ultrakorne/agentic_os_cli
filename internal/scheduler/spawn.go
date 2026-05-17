@@ -1,13 +1,9 @@
 package scheduler
 
 import (
-	"fmt"
-	"math/rand"
 	"os"
 	"os/exec"
-	"sync"
 	"syscall"
-	"time"
 )
 
 // SpawnOpts configures one wrapper invocation. The wrapper's argv contract is
@@ -44,17 +40,3 @@ func SpawnWrapperDetached(wrapperPath string, opts SpawnOpts) error {
 	return cmd.Process.Release()
 }
 
-var (
-	runIDOnce sync.Once
-	runIDRand *rand.Rand
-)
-
-// NewRunID mirrors wrapper.sh's fallback id format (<unix-millis>-<rand4>).
-// Threading a pre-generated id through the wrapper's 5th argv lets stubs
-// returned by aos run / aos tick match the on-disk record the wrapper writes.
-func NewRunID() string {
-	runIDOnce.Do(func() {
-		runIDRand = rand.New(rand.NewSource(time.Now().UnixNano()))
-	})
-	return fmt.Sprintf("%d-%04x", time.Now().UnixMilli(), runIDRand.Int31()&0xffff)
-}

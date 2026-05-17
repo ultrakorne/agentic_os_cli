@@ -61,12 +61,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s is not executable", wrapperPath)
 	}
 
-	runID := scheduler.NewRunID()
+	store := scheduler.NewFileRunStore(cfg.AosHome)
+	runID := store.NewID()
 	now := time.Now()
-	startedAt := isoMillisUTC(now)
+	startedAt := scheduler.FormatRunTimestamp(now)
 	estimateDur := time.Duration(-1)
 	estimateMillis := int64(-1)
-	if estimate, ok, err := scheduler.EstimateRunDuration(filepath.Join(cfg.AosHome, "runs"), agent.ID, 10); err != nil {
+	if estimate, ok, err := store.EstimateDuration(agent.ID, 10); err != nil {
 		return fmt.Errorf("estimate run duration: %w", err)
 	} else if ok {
 		estimateDur = estimate
@@ -95,7 +96,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if !runWaitFlag {
 		return nil
 	}
-	return waitFlow(filepath.Join(cfg.AosHome, "runs"), runID, agent.ID, now, estimateDur)
+	return waitFlow(store, runID, agent.ID, now, estimateDur)
 }
 
 // runStub mirrors the Run JSON shape the renderer expects, plus an
@@ -143,11 +144,6 @@ func estimateString(v any) string {
 	// Round to 100 ms (~1 decimal of a second) so the stub prints clean values
 	// like "1.2s" or "1m23.5s" instead of full ns-precision output.
 	return (time.Duration(ms) * time.Millisecond).Round(100 * time.Millisecond).String()
-}
-
-// isoMillisUTC mirrors wrapper.sh's iso_now: millisecond-precision UTC.
-func isoMillisUTC(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 func init() {

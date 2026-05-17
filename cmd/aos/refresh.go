@@ -13,7 +13,6 @@ import (
 	"github.com/ultrakorne/aos_cli/internal/config"
 	"github.com/ultrakorne/aos_cli/internal/crontab"
 	"github.com/ultrakorne/aos_cli/internal/logtrim"
-	"github.com/ultrakorne/aos_cli/internal/runsgc"
 	"github.com/ultrakorne/aos_cli/internal/runtime"
 	"github.com/ultrakorne/aos_cli/internal/scheduler"
 )
@@ -224,7 +223,7 @@ func RunRefresh() (RefreshSummary, error) {
 		sum.Log = "trimmed"
 	}
 
-	runsRes, err := runsgc.Sweep(filepath.Join(cfg.AosHome, "runs"), cfg.EffectiveRunsHardCap())
+	runsRes, err := scheduler.NewFileRunStore(cfg.AosHome).Sweep(cfg.EffectiveRunsHardCap())
 	if err != nil {
 		sum.Runs = "skipped:" + sanitize(err.Error())
 	} else if runsRes.Deleted > 0 {

@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+// storeFor wraps a raw runs-directory path into a FileRunStore. WaitForRun
+// now takes the store directly; this helper keeps each test body terse.
+func storeFor(dir string) *FileRunStore {
+	return NewFileRunStoreFromDir(dir)
+}
+
 // writeRunMetaWithExit writes a finished record (status from caller, optional
 // exit code) so WaitForRun can observe a terminal state.
 func writeTerminalRunMeta(t *testing.T, dir, id, status string, exitCode int) {
@@ -46,7 +52,7 @@ func TestWaitForRun_toleratesMissingInitialRecord(t *testing.T) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	run, err := WaitForRun(ctx, dir, "r-1", 10*time.Millisecond)
+	run, err := WaitForRun(ctx, storeFor(dir), "r-1", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("WaitForRun: %v", err)
 	}
@@ -61,7 +67,7 @@ func TestWaitForRun_stopsOnSuccess(t *testing.T) {
 	writeTerminalRunMeta(t, dir, "r-1", "success", 0)
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	run, err := WaitForRun(ctx, dir, "r-1", 10*time.Millisecond)
+	run, err := WaitForRun(ctx, storeFor(dir), "r-1", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("WaitForRun: %v", err)
 	}
@@ -79,7 +85,7 @@ func TestWaitForRun_stopsOnError(t *testing.T) {
 	writeTerminalRunMeta(t, dir, "r-1", "error", 2)
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	run, err := WaitForRun(ctx, dir, "r-1", 10*time.Millisecond)
+	run, err := WaitForRun(ctx, storeFor(dir), "r-1", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("WaitForRun: %v", err)
 	}
@@ -103,7 +109,7 @@ func TestWaitForRun_keepsPollingWhileRunning(t *testing.T) {
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	run, err := WaitForRun(ctx, dir, "r-1", 10*time.Millisecond)
+	run, err := WaitForRun(ctx, storeFor(dir), "r-1", 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("WaitForRun: %v", err)
 	}
@@ -117,7 +123,7 @@ func TestWaitForRun_contextCancel(t *testing.T) {
 	dir := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
-	_, err := WaitForRun(ctx, dir, "never-appears", 10*time.Millisecond)
+	_, err := WaitForRun(ctx, storeFor(dir), "never-appears", 10*time.Millisecond)
 	if !errors.Is(err, ErrWaitCanceled) {
 		t.Fatalf("err = %v, want ErrWaitCanceled", err)
 	}
@@ -134,12 +140,12 @@ func TestWaitForRun_outputAvailableAfterMetadata(t *testing.T) {
 	writeTerminalRunMeta(t, dir, "r-1", "success", 0)
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	if _, err := WaitForRun(ctx, dir, "r-1", 10*time.Millisecond); err != nil {
+	if _, err := WaitForRun(ctx, storeFor(dir), "r-1", 10*time.Millisecond); err != nil {
 		t.Fatalf("WaitForRun: %v", err)
 	}
-	data, err := ReadRunOutput(dir, "r-1")
+	data, err := storeFor(dir).Output("r-1")
 	if err != nil {
-		t.Fatalf("ReadRunOutput: %v", err)
+		t.Fatalf("Output: %v", err)
 	}
 	if string(data) != "hello\n" {
 		t.Errorf("output = %q, want hello", string(data))

@@ -8,6 +8,12 @@
 #
 # trigger defaults to 'schedule'; manual runs from the UI set
 # AGENTIC_OS_TRIGGER=manual in env.
+#
+# TIMESTAMP FORMAT: iso_now below MUST emit the same shape the Go side
+# normalizes on — millisecond-precision UTC, e.g. "2026-05-16T13:09:37.072Z".
+# See scheduler.RunTimestampFormat / FormatRunTimestamp. Records that diverge
+# break same-second lexicographic sorting; tests live in
+# internal/scheduler/wrapper_format_test.go.
 
 set -uo pipefail
 

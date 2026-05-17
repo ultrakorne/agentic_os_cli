@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +33,7 @@ import (
 // highlights and driven from the same arrow-key flow as the rest.
 type detailsModel struct {
 	aosHome string
-	runsDir string
+	store   *scheduler.FileRunStore
 
 	agent    scheduler.Agent
 	metaPath string
@@ -191,9 +190,7 @@ func (k detailsKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{k.ShortHelp()}
 }
 
-func newDetailsModel(aosHome string, agent scheduler.Agent, h help.Model) *detailsModel {
-	runsDir := filepath.Join(aosHome, "runs")
-
+func newDetailsModel(aosHome string, store *scheduler.FileRunStore, agent scheduler.Agent, h help.Model) *detailsModel {
 	ta := textarea.New()
 	ta.Placeholder = "no description"
 	ta.SetValue(agent.Meta.Description)
@@ -261,7 +258,7 @@ func newDetailsModel(aosHome string, agent scheduler.Agent, h help.Model) *detai
 
 	return &detailsModel{
 		aosHome:     aosHome,
-		runsDir:     runsDir,
+		store:       store,
 		agent:       agent,
 		metaPath:    agent.MetaPath,
 		active:      paneConfig,
@@ -300,10 +297,10 @@ func (m *detailsModel) Init() tea.Cmd {
 // cache from startModel because that one only keeps the latest run per agent;
 // the popup wants the full history.
 func (m *detailsModel) loadRunsCmd() tea.Cmd {
-	runsDir := m.runsDir
+	store := m.store
 	agentID := m.agent.ID
 	return func() tea.Msg {
-		runs, err := scheduler.ReadRuns(runsDir, agentID, 0)
+		runs, err := store.List(scheduler.Filter{AgentID: agentID})
 		if err != nil {
 			return detailsRunsLoadedMsg{err: err}
 		}
@@ -800,9 +797,9 @@ func (m *detailsModel) selectedRun() (scheduler.Run, bool) {
 // denied, IO error) flows through runOutputLoadedMsg.err so the user sees
 // the actual problem instead of a misleading "(no output)".
 func (m *detailsModel) loadRunOutputCmd(r scheduler.Run) tea.Cmd {
-	runsDir := m.runsDir
+	store := m.store
 	return func() tea.Msg {
-		out, err := scheduler.ReadRunOutput(runsDir, r.ID)
+		out, err := store.Output(r.ID)
 		if err != nil {
 			return runOutputLoadedMsg{runID: r.ID, err: err}
 		}

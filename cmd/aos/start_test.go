@@ -28,7 +28,7 @@ func newTestModel(t *testing.T) *startModel {
 	events := make(chan fsnotify.Event)
 	errs := make(chan error)
 	t.Cleanup(func() { close(events); close(errs) })
-	m := newStartModel("/fake/home", scan, nil, events, errs)
+	m := newStartModel("/fake/home", scheduler.NewFileRunStore("/fake/home"), scan, nil, events, errs)
 	m.width = 80
 	m.height = 24
 	m.applyLayout()
@@ -346,7 +346,7 @@ func TestStart_emptyStateFooter(t *testing.T) {
 	events := make(chan fsnotify.Event)
 	errs := make(chan error)
 	t.Cleanup(func() { close(events); close(errs) })
-	m := newStartModel("/fake/home", scheduler.ScanResult{}, nil, events, errs)
+	m := newStartModel("/fake/home", scheduler.NewFileRunStore("/fake/home"), scheduler.ScanResult{}, nil, events, errs)
 	m.width = 80
 	m.height = 24
 	m.applyLayout()

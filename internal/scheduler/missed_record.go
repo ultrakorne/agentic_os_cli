@@ -1,12 +1,7 @@
 package scheduler
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 )
@@ -34,21 +29,18 @@ func MissedRunID(agentID string, expectedAt time.Time) string {
 //   - written: misses actually written this call (zero when every detected
 //     miss already has a matching file on disk). aos tick / aos refresh
 //     surface the count as their "newly recorded this tick" summary.
-//   - updated: the post-write []Run. Same shape as a fresh LoadRuns
+//   - updated: the post-write []Run. Same shape as a fresh store.Load
 //     would produce — stale miss records removed, new ones appended with
 //     StartedAtTime populated — so the caller can chain into a follow-up
 //     pass (DetectCatchups in aos tick) without re-reading the directory.
 func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRun, []Run, error) {
-	runsDir := filepath.Join(aosHome, "runs")
-	if err := os.MkdirAll(runsDir, 0o755); err != nil {
-		return nil, nil, fmt.Errorf("mkdir runs: %w", err)
-	}
+	store := NewFileRunStore(aosHome)
 
-	// Surface a LoadRuns error rather than swallowing — if the runs dir is
+	// Surface a Load error rather than swallowing — if the runs dir is
 	// unreadable (permission denied, etc.) we'd otherwise treat it as empty
-	// and re-record misses every tick. LoadRuns already handles ErrNotExist
-	// internally, so a clean install with no runs/ yet still returns (nil, nil).
-	runs, err := LoadRuns(runsDir)
+	// and re-record misses every tick. Load handles ErrNotExist internally,
+	// so a clean install with no runs/ yet still returns (nil, nil).
+	runs, err := store.Load()
 	if err != nil {
 		return nil, nil, fmt.Errorf("load runs: %w", err)
 	}
@@ -57,32 +49,27 @@ func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRu
 		return nil, runs, nil
 	}
 
-	// Index existing miss records by agent so we can identify both "already
-	// recorded this exact slot" (skip) and "stale miss for a different slot"
-	// (delete before writing the new one).
-	existingByAgent := map[string][]string{}
-	for _, r := range runs {
-		if r.Status != StatusMissed {
-			continue
-		}
-		existingByAgent[r.AgentID] = append(existingByAgent[r.AgentID], r.ID)
-	}
+	// Build the existing-miss-by-agent index from the in-memory slice once,
+	// then drive replacement through the store's batch-friendly API. This
+	// keeps the directory walk to a single pass even when many agents need
+	// replacement on the same tick.
+	idx := store.IndexMissedFromRuns(runs)
 
 	var written []MissedRun
 	for _, m := range detected {
-		newID := MissedRunID(m.AgentID, m.ExpectedAt)
-		if slices.Contains(existingByAgent[m.AgentID], newID) {
-			continue
-		}
-		for _, id := range existingByAgent[m.AgentID] {
-			if err := os.Remove(filepath.Join(runsDir, id+".json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return written, runs, fmt.Errorf("remove stale miss %s: %w", id, err)
-			}
-			runs = removeRunByID(runs, id)
-		}
-		newRun, err := writeMissedRun(runsDir, newID, m)
+		stale := append([]string(nil), idx[m.AgentID]...)
+		newRun, wrote, err := store.ReplaceMissedWith(idx, m.AgentID, m.ExpectedAt)
 		if err != nil {
 			return written, runs, err
+		}
+		if !wrote {
+			continue
+		}
+		// Mirror the disk delete in the in-memory slice so the returned
+		// view reflects what a fresh Load would produce — tick.fireCatchups
+		// chains off this slice.
+		for _, id := range stale {
+			runs = removeRunByID(runs, id)
 		}
 		runs = append(runs, newRun)
 		written = append(written, m)
@@ -101,40 +88,4 @@ func removeRunByID(runs []Run, id string) []Run {
 		out = append(out, r)
 	}
 	return out
-}
-
-// writeMissedRun marshals a Run{Status: StatusMissed, ...} for the given
-// slot, writes it atomically (temp+rename) into runsDir, and returns the
-// in-memory record (with StartedAtTime populated) so callers can stitch it
-// into their working runs slice without re-reading the file.
-func writeMissedRun(runsDir, id string, m MissedRun) (Run, error) {
-	expectedUTC := m.ExpectedAt.UTC()
-	run := Run{
-		ID:            id,
-		AgentID:         m.AgentID,
-		ScheduleID:    nil,
-		Trigger:       "schedule",
-		StartedAt:     expectedUTC.Format(time.RFC3339Nano),
-		StartedAtTime: expectedUTC,
-		EndedAt:       nil,
-		Status:        StatusMissed,
-		Output:        "",
-		Error:         nil,
-		ExitCode:      nil,
-		OutputPath:    nil,
-	}
-	buf, err := json.MarshalIndent(run, "", "  ")
-	if err != nil {
-		return Run{}, fmt.Errorf("marshal miss %s: %w", id, err)
-	}
-	full := filepath.Join(runsDir, id+".json")
-	tmp := full + ".tmp"
-	if err := os.WriteFile(tmp, buf, 0o644); err != nil {
-		return Run{}, fmt.Errorf("write %s: %w", tmp, err)
-	}
-	if err := os.Rename(tmp, full); err != nil {
-		_ = os.Remove(tmp)
-		return Run{}, fmt.Errorf("rename %s: %w", full, err)
-	}
-	return run, nil
 }

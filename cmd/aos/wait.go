@@ -22,7 +22,7 @@ import (
 var ErrWaitCanceled = errors.New("wait canceled")
 
 // waitFlow runs the bubble-tea progress/spinner on stderr while the detached
-// wrapper writes the run record to runsDir, then prints the .out bytes to
+// wrapper writes the run record into the store, then prints the .out bytes to
 // stdout. estimate < 0 means "no historical data" and forces the indeterminate
 // spinner. The caller (runRun) has already printed the Run stub on stdout
 // before calling us, so the final layout is:
@@ -30,11 +30,11 @@ var ErrWaitCanceled = errors.New("wait canceled")
 //	stdout: <stub (human or json)>      ← printed by runRun
 //	stderr: <progress/spinner>           ← printed here while waiting
 //	stdout: <raw .out bytes>             ← printed here after waiting
-func waitFlow(runsDir, runID, agentID string, startedAt time.Time, estimate time.Duration) error {
+func waitFlow(store *scheduler.FileRunStore, runID, agentID string, startedAt time.Time, estimate time.Duration) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	model := newWaitModel(ctx, runsDir, runID, agentID, startedAt, estimate)
+	model := newWaitModel(ctx, store, runID, agentID, startedAt, estimate)
 	p := tea.NewProgram(model, tea.WithOutput(os.Stderr))
 	finalM, err := p.Run()
 	if err != nil {
@@ -55,15 +55,15 @@ func waitFlow(runsDir, runID, agentID string, startedAt time.Time, estimate time
 	if wm.final == nil {
 		return errors.New("wait ended without a final run record")
 	}
-	return finalizeRun(runsDir, runID, *wm.final, os.Stdout)
+	return finalizeRun(store, runID, *wm.final, os.Stdout)
 }
 
 // finalizeRun writes the .out bytes for runID to stdout, then returns a
 // non-nil error if the run did not succeed (status=error, or exitCode != 0).
 // The plan requires output-first, error-second so a failed run's stderr still
 // reaches the user before we abort.
-func finalizeRun(runsDir, runID string, run scheduler.Run, stdout io.Writer) error {
-	data, _ := scheduler.ReadRunOutput(runsDir, runID)
+func finalizeRun(store *scheduler.FileRunStore, runID string, run scheduler.Run, stdout io.Writer) error {
+	data, _ := store.Output(runID)
 	if len(data) > 0 {
 		_, _ = stdout.Write(data)
 	}
@@ -93,7 +93,7 @@ type waitDoneMsg struct {
 
 type waitModel struct {
 	ctx       context.Context
-	runsDir   string
+	store     *scheduler.FileRunStore
 	runID     string
 	agentID   string
 	startedAt time.Time
@@ -107,7 +107,7 @@ type waitModel struct {
 	canceled bool
 }
 
-func newWaitModel(ctx context.Context, runsDir, runID, agentID string, startedAt time.Time, estimate time.Duration) waitModel {
+func newWaitModel(ctx context.Context, store *scheduler.FileRunStore, runID, agentID string, startedAt time.Time, estimate time.Duration) waitModel {
 	// Progress bar fills with the "running" status color (ANSI yellow) because
 	// it *is* a running indicator — same hue the status field uses elsewhere,
 	// so the bar and the word "running" read as one signal. The empty track
@@ -121,7 +121,7 @@ func newWaitModel(ctx context.Context, runsDir, runID, agentID string, startedAt
 	bar.EmptyColor = colorMuted
 	return waitModel{
 		ctx:       ctx,
-		runsDir:   runsDir,
+		store:     store,
 		runID:     runID,
 		agentID:   agentID,
 		startedAt: startedAt,
@@ -155,7 +155,7 @@ func useSpinner(estimate time.Duration) bool {
 // distinguish it from a real read error.
 func (m waitModel) waitCmd() tea.Cmd {
 	return func() tea.Msg {
-		run, err := scheduler.WaitForRun(m.ctx, m.runsDir, m.runID, 250*time.Millisecond)
+		run, err := scheduler.WaitForRun(m.ctx, m.store, m.runID, 250*time.Millisecond)
 		return waitDoneMsg{run: run, err: err}
 	}
 }

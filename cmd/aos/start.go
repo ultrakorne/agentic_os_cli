@@ -36,17 +36,17 @@ func runStart(cmd *cobra.Command, args []string) error {
 	}
 
 	agentsDir := filepath.Join(cfg.AosHome, "agents")
-	runsDir := filepath.Join(cfg.AosHome, "runs")
+	store := scheduler.NewFileRunStore(cfg.AosHome)
 
 	scan, err := scheduler.ScanAgents(agentsDir)
 	if err != nil {
 		return fmt.Errorf("scan agents: %w", err)
 	}
 	// Ensure runs/ exists so fsnotify.Add doesn't fail on a fresh init.
-	if err := os.MkdirAll(runsDir, 0o755); err != nil {
+	if err := os.MkdirAll(store.Dir(), 0o755); err != nil {
 		return fmt.Errorf("mkdir runs: %w", err)
 	}
-	runs, err := scheduler.ReadRuns(runsDir, "", 0)
+	runs, err := store.List(scheduler.Filter{})
 	if err != nil {
 		return fmt.Errorf("read runs: %w", err)
 	}
@@ -55,13 +55,13 @@ func runStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("create watcher: %w", err)
 	}
-	if err := watcher.Add(runsDir); err != nil {
+	if err := watcher.Add(store.Dir()); err != nil {
 		watcher.Close()
-		return fmt.Errorf("watch %s: %w", runsDir, err)
+		return fmt.Errorf("watch %s: %w", store.Dir(), err)
 	}
 	defer watcher.Close()
 
-	model := newStartModel(cfg.AosHome, scan, runs, watcher.Events, watcher.Errors)
+	model := newStartModel(cfg.AosHome, store, scan, runs, watcher.Events, watcher.Errors)
 	_, err = tea.NewProgram(&model).Run()
 	return err
 }

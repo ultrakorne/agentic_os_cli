@@ -25,7 +25,7 @@ import (
 // list.Model.
 type startModel struct {
 	aosHome string
-	runsDir string
+	store   *scheduler.FileRunStore
 	wrapper string
 
 	sections []sectionPanel
@@ -202,7 +202,7 @@ type clearToastMsg struct{}
 
 const toastTTL = 5 * time.Second
 
-func newStartModel(aosHome string, scan scheduler.ScanResult, runs []scheduler.Run, events chan fsnotify.Event, errs chan error) startModel {
+func newStartModel(aosHome string, store *scheduler.FileRunStore, scan scheduler.ScanResult, runs []scheduler.Run, events chan fsnotify.Event, errs chan error) startModel {
 	// Group agents by section in scan order. ScanAgents already returns
 	// agents sorted by id; sections come from the first occurrence.
 	type group struct {
@@ -305,7 +305,7 @@ func newStartModel(aosHome string, scan scheduler.ScanResult, runs []scheduler.R
 
 	return startModel{
 		aosHome:  aosHome,
-		runsDir:  filepath.Join(aosHome, "runs"),
+		store:    store,
 		wrapper:  filepath.Join(aosHome, "wrapper.sh"),
 		sections: sections,
 		agentLoc: agentLoc,
@@ -541,7 +541,7 @@ func (m *startModel) runFocused() tea.Cmd {
 		AosHome:    m.aosHome,
 		AgentID:    it.agent.ID,
 		ScriptPath: it.agent.ScriptPath,
-		RunID:      scheduler.NewRunID(),
+		RunID:      m.store.NewID(),
 		Trigger:    "manual",
 	}
 	wrapper := m.wrapper
@@ -568,7 +568,7 @@ func (m *startModel) openPopup() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	popup := newDetailsModel(m.aosHome, it.agent, m.help)
+	popup := newDetailsModel(m.aosHome, m.store, it.agent, m.help)
 	popup.SetSize(m.width, m.height)
 	m.popup = popup
 	return m, popup.Init()
@@ -603,7 +603,7 @@ func (m *startModel) applyMetaUpdate(agentID string, meta scheduler.AgentMeta) {
 // it belongs to, and updates that agent's item in its list. Returns the cmd
 // from list.SetItem so any side-effect (none today) is captured.
 func (m *startModel) applyRunChange(runID string) tea.Cmd {
-	r, err := scheduler.ReadRun(m.runsDir, runID)
+	r, err := m.store.Get(runID)
 	if err != nil || r.AgentID == "" {
 		return nil
 	}

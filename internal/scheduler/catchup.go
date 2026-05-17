@@ -23,13 +23,12 @@ type CatchupCandidate struct {
 //
 // Order is stable by AgentID so the caller's log output is deterministic.
 //
-// "Latest" is compared via StartedAtTime (parsed by LoadRuns) rather than the
-// raw StartedAt string. Writers emit subseconds inconsistently — wrapper.sh
-// always carries ms (".123Z"), aos run forces 3-digit ms (".000Z"), but
-// time.RFC3339Nano strips trailing zeros so a zero-subsecond miss record
-// emits just "Z". ASCII '.' (46) < 'Z' (90), so a same-second wrapper run
-// would lex-compare *before* its covering miss — flipping the order and
-// triggering a phantom catch-up.
+// "Latest" is compared via StartedAtTime (parsed by FileRunStore.Load) rather
+// than the raw StartedAt string. FileRunStore writes StartedAt via
+// FormatRunTimestamp so every Go-side writer uses the same millisecond UTC
+// shape wrapper.sh's iso_now produces, but historical records on disk may
+// still mix shapes — the time.Time comparison keeps the sort honest either
+// way.
 func DetectCatchups(agents []Agent, runs []Run) []CatchupCandidate {
 	latestByAgent := map[string]Run{}
 	for _, r := range runs {
