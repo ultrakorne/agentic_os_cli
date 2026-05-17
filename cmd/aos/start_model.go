@@ -46,6 +46,11 @@ type startModel struct {
 
 	events chan fsnotify.Event
 	errs   chan error
+
+	// popup is non-nil while the agent-details overlay is open. While set,
+	// Update routes input through the popup and View renders it instead of
+	// the section grid.
+	popup *detailsModel
 }
 
 type sectionPanel struct {
@@ -340,6 +345,36 @@ func (m *startModel) watchErrCmd() tea.Cmd {
 }
 
 func (m *startModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Popup intercepts: while the agent-details overlay is open it owns the
+	// screen. Resize and timer/toast messages still need to fan out to the
+	// parent so the layout stays consistent if the popup closes; the popup
+	// itself also wants to see them. Special parent-side messages
+	// (popupClosedMsg, agentMetaUpdatedMsg) are handled below before
+	// forwarding.
+	switch msg := msg.(type) {
+	case popupClosedMsg:
+		m.popup = nil
+		return m, nil
+	case agentMetaUpdatedMsg:
+		m.applyMetaUpdate(msg.agentID, msg.meta)
+		// Don't drop msg — popup also wants to acknowledge it via the
+		// usual flow (toast clear etc.). Fall through.
+	}
+
+	if m.popup != nil {
+		// WindowSize is critical for both models; let popup re-layout, and
+		// keep the parent's stored size in sync so close-then-render still
+		// works.
+		if ws, ok := msg.(tea.WindowSizeMsg); ok {
+			m.width = ws.Width
+			m.height = ws.Height
+			m.applyLayout()
+		}
+		var cmd tea.Cmd
+		m.popup, cmd = m.popup.Update(msg)
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -403,6 +438,8 @@ func (m *startModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "x":
 		return m, m.runFocused()
+	case "enter":
+		return m.openPopup()
 	case "j", "down":
 		if m.atListBottom() && m.hopSection(+1) {
 			return m, nil
@@ -507,6 +544,52 @@ func (m *startModel) runFocused() tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// openPopup builds a detailsModel around the currently focused agent and
+// stores it on the parent. Init() kicks off the run-history load so the
+// History pane fills in lazily.
+func (m *startModel) openPopup() (tea.Model, tea.Cmd) {
+	if len(m.sections) == 0 {
+		return m, nil
+	}
+	sel := m.sections[m.focused].list.SelectedItem()
+	if sel == nil {
+		return m, nil
+	}
+	it, ok := sel.(agentItem)
+	if !ok {
+		return m, nil
+	}
+	popup := newDetailsModel(m.aosHome, it.agent, m.help)
+	popup.SetSize(m.width, m.height)
+	m.popup = popup
+	return m, popup.Init()
+}
+
+// applyMetaUpdate refreshes the in-memory agent record after the popup writes
+// a new description / schedule, so the section list row reflects the change
+// without a full rescan. Scheduled count is recomputed too — if the kind
+// flipped on or off, the section header's count needs to follow.
+func (m *startModel) applyMetaUpdate(agentID string, meta scheduler.AgentMeta) {
+	loc, ok := m.agentLoc[agentID]
+	if !ok {
+		return
+	}
+	sec := &m.sections[loc.section]
+	cur, ok := sec.list.Items()[loc.item].(agentItem)
+	if !ok {
+		return
+	}
+	prevScheduled := cur.agent.Meta.Schedule != nil
+	cur.agent.Meta = meta
+	nowScheduled := meta.Schedule != nil
+	if prevScheduled && !nowScheduled {
+		sec.scheduledCount--
+	} else if !prevScheduled && nowScheduled {
+		sec.scheduledCount++
+	}
+	sec.list.SetItem(loc.item, cur)
 }
 
 // applyRunChange re-reads the run record named runID, looks up which agent

@@ -29,7 +29,6 @@ var (
 	colorHeader   = lipgloss.Color("6")  // cyan   — secondary accent
 	colorEmphasis = lipgloss.Color("15") // bright white / theme foreground
 
-	styleHeader = lipgloss.NewStyle().Foreground(colorHeader).Bold(true)
 	// styleLabel / styleMuted use the SGR Faint attribute instead of a fixed
 	// foreground so they stay legible on any theme. ANSI 8 (bright black) is
 	// dim by design, but on some themes it sits almost on top of the
@@ -161,13 +160,13 @@ type kvRow struct {
 	Style *lipgloss.Style
 }
 
-// printKV renders a styled key/value block. Keys right-align within their
-// column so the values form a clean vertical edge regardless of label length.
-// Empty values fall back to "-" so the block never has trailing whitespace
-// holes that look like a rendering bug.
-func printKV(rows []kvRow) {
+// formatKV returns the styled key/value block as a string (trailing newline
+// included). Same formatting rules as printKV — separated out so the TUI
+// detail popup can reuse the exact CLI layout inside its viewport rather
+// than reinventing it.
+func formatKV(rows []kvRow) string {
 	if len(rows) == 0 {
-		return
+		return ""
 	}
 	keyWidth := 0
 	for _, r := range rows {
@@ -176,6 +175,7 @@ func printKV(rows []kvRow) {
 		}
 	}
 	keyCol := styleLabel.Width(keyWidth)
+	var b strings.Builder
 	for _, r := range rows {
 		val := r.Value
 		if strings.TrimSpace(val) == "" {
@@ -187,8 +187,20 @@ func printKV(rows []kvRow) {
 		} else {
 			rendered = styleValue.Render(val)
 		}
-		fmt.Println(keyCol.Render(r.Key) + "  " + rendered)
+		b.WriteString(keyCol.Render(r.Key))
+		b.WriteString("  ")
+		b.WriteString(rendered)
+		b.WriteByte('\n')
 	}
+	return b.String()
+}
+
+// printKV renders a styled key/value block. Keys right-align within their
+// column so the values form a clean vertical edge regardless of label length.
+// Empty values fall back to "-" so the block never has trailing whitespace
+// holes that look like a rendering bug.
+func printKV(rows []kvRow) {
+	fmt.Print(formatKV(rows))
 }
 
 // banner prints a one-line header like "aos refresh" in the accent style.

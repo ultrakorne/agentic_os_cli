@@ -101,6 +101,16 @@ func (m *startModel) View() tea.View {
 		return tea.NewView("")
 	}
 
+	// When the details popup is open it owns the whole screen — the section
+	// grid sits underneath but isn't visible. Full-screen takeover keeps
+	// rendering simple (no z-order, no transparent overlay) and matches the
+	// plan's "detail overlay (full-screen take-over)" wording.
+	if m.popup != nil {
+		v := tea.NewView(m.popup.View())
+		v.AltScreen = true
+		return v
+	}
+
 	// Refresh each list's delegate so the per-row Render knows whether its
 	// containing section currently has parent focus. Without this, every
 	// list highlights its Index() unconditionally — so a non-focused

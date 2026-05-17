@@ -134,8 +134,11 @@ func runsCountSummary(shown, total int, agentID string) string {
 	return fmt.Sprintf("showing %d %s%s", total, noun, suffix)
 }
 
-func printOneRunHuman(r scheduler.JobRun) error {
-	banner("runs " + r.ID)
+// formatRun renders a JobRun as the kv block + "output" section, returning a
+// single string. Shared between the `aos runs <id>` human view and the start
+// TUI's detail popup so both surfaces stay aligned when fields are added or
+// the rendering shifts.
+func formatRun(r scheduler.JobRun) string {
 	statusS := statusStyle(string(r.Status))
 	rows := []kvRow{
 		{Key: "agent", Value: r.JobID},
@@ -157,18 +160,26 @@ func printOneRunHuman(r scheduler.JobRun) error {
 		errS := styleErr
 		rows = append(rows, kvRow{Key: "error", Value: *r.Error, Style: &errS})
 	}
-	printKV(rows)
+	var b strings.Builder
+	b.WriteString(formatKV(rows))
 	// Captured stdout/stderr lives in the .out file (loaded into r.Output by
 	// showOneRun). Render it as a labeled block below the kv pairs so
 	// multi-line content doesn't break the right-aligned key column.
 	if r.Output != "" {
-		fmt.Println()
-		fmt.Println(styleLabel.Render("output"))
-		fmt.Print(r.Output)
+		b.WriteByte('\n')
+		b.WriteString(styleLabel.Render("output"))
+		b.WriteByte('\n')
+		b.WriteString(r.Output)
 		if !strings.HasSuffix(r.Output, "\n") {
-			fmt.Println()
+			b.WriteByte('\n')
 		}
 	}
+	return b.String()
+}
+
+func printOneRunHuman(r scheduler.JobRun) error {
+	banner("runs " + r.ID)
+	fmt.Print(formatRun(r))
 	return nil
 }
 

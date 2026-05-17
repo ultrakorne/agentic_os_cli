@@ -89,6 +89,49 @@ func runSchedule(cmd *cobra.Command, args []string) error {
 	return printScheduleHuman(agent.ID, meta, refresh, refErr)
 }
 
+// scheduleInput is the explicit form of "what schedule does the user want?",
+// decoupled from cobra's "inferred from which flags are set" form. The TUI
+// popup constructs one directly; parseSchedFlags translates cobra state into
+// one and forwards to buildScheduleSpec so both callers go through the same
+// field validation.
+type scheduleInput struct {
+	Kind       string // "off", "hourly", or "daily"
+	EveryHours int
+	Hour       int
+	Minute     int
+	Days       []scheduler.Weekday
+}
+
+func buildScheduleSpec(in scheduleInput) (*scheduler.ScheduleSpec, error) {
+	switch in.Kind {
+	case "off":
+		return nil, nil
+	case "hourly":
+		spec := &scheduler.ScheduleSpec{
+			Kind:       "hourly",
+			EveryHours: in.EveryHours,
+			Minute:     in.Minute,
+		}
+		if _, err := scheduler.CompileToCron(*spec); err != nil {
+			return nil, err
+		}
+		return spec, nil
+	case "daily":
+		spec := &scheduler.ScheduleSpec{
+			Kind:   "daily",
+			Days:   in.Days,
+			Hour:   in.Hour,
+			Minute: in.Minute,
+		}
+		if _, err := scheduler.CompileToCron(*spec); err != nil {
+			return nil, err
+		}
+		return spec, nil
+	default:
+		return nil, fmt.Errorf("unknown schedule kind %q", in.Kind)
+	}
+}
+
 func parseSchedFlags(cmd *cobra.Command) (*scheduler.ScheduleSpec, error) {
 	fs := cmd.Flags()
 	everySet := fs.Changed("every-hours")
@@ -100,7 +143,7 @@ func parseSchedFlags(cmd *cobra.Command) (*scheduler.ScheduleSpec, error) {
 		if everySet || hourSet || minuteSet || daysSet {
 			return nil, errors.New("--off cannot be combined with schedule flags")
 		}
-		return nil, nil
+		return buildScheduleSpec(scheduleInput{Kind: "off"})
 	}
 
 	switch {
@@ -110,15 +153,11 @@ func parseSchedFlags(cmd *cobra.Command) (*scheduler.ScheduleSpec, error) {
 		if !minuteSet {
 			return nil, errors.New("hourly schedule requires --minute")
 		}
-		spec := &scheduler.ScheduleSpec{
+		return buildScheduleSpec(scheduleInput{
 			Kind:       "hourly",
 			EveryHours: schedEveryHours,
 			Minute:     schedMinute,
-		}
-		if _, err := scheduler.CompileToCron(*spec); err != nil {
-			return nil, err
-		}
-		return spec, nil
+		})
 	case hourSet || daysSet:
 		if !hourSet || !minuteSet || !daysSet {
 			return nil, errors.New("daily schedule requires --hour, --minute, and --days")
@@ -127,16 +166,12 @@ func parseSchedFlags(cmd *cobra.Command) (*scheduler.ScheduleSpec, error) {
 		if err != nil {
 			return nil, err
 		}
-		spec := &scheduler.ScheduleSpec{
+		return buildScheduleSpec(scheduleInput{
 			Kind:   "daily",
 			Days:   days,
 			Hour:   schedHour,
 			Minute: schedMinute,
-		}
-		if _, err := scheduler.CompileToCron(*spec); err != nil {
-			return nil, err
-		}
-		return spec, nil
+		})
 	default:
 		return nil, errors.New("provide a schedule (--every-hours / --hour+--days) or --off to clear")
 	}
