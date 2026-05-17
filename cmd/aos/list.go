@@ -113,9 +113,40 @@ func summarizeSchedule(s *scheduler.ScheduleSpec) string {
 		}
 		return fmt.Sprintf("every %dh :%02d", s.EveryHours, s.Minute)
 	case "daily":
-		return fmt.Sprintf("%s %02d:%02d", joinDays(s.Days), s.Hour, s.Minute)
+		return fmt.Sprintf("%s %02d:%02d", humanizeDays(s.Days), s.Hour, s.Minute)
 	}
 	return s.Kind
+}
+
+// humanizeDays collapses three common day-of-week sets into a single word for
+// the list/describe summary: the full week becomes "everyday", mon..fri becomes
+// "weekdays", and sat+sun becomes "weekends". Any other combination falls
+// through to the literal comma list so partial patterns stay unambiguous.
+func humanizeDays(days []scheduler.Weekday) string {
+	seen := make(map[scheduler.Weekday]struct{}, len(days))
+	for _, d := range days {
+		seen[d] = struct{}{}
+	}
+	matches := func(want ...scheduler.Weekday) bool {
+		if len(seen) != len(want) {
+			return false
+		}
+		for _, d := range want {
+			if _, ok := seen[d]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case matches(scheduler.Mon, scheduler.Tue, scheduler.Wed, scheduler.Thu, scheduler.Fri, scheduler.Sat, scheduler.Sun):
+		return "everyday"
+	case matches(scheduler.Mon, scheduler.Tue, scheduler.Wed, scheduler.Thu, scheduler.Fri):
+		return "weekdays"
+	case matches(scheduler.Sat, scheduler.Sun):
+		return "weekends"
+	}
+	return joinDays(days)
 }
 
 // displaySection capitalizes the first rune of the section label so the

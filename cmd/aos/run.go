@@ -168,16 +168,15 @@ var (
 )
 
 // newRunID is the engine-side analogue of wrapper.sh's fallback id format
-// (`<unix>-<pid>-<rand><rand>`). Threading a pre-generated id through the
+// (`<unix-millis>-<rand4>`). Threading a pre-generated id through the
 // wrapper's 5th argv lets the stub returned to the renderer match the file
-// name the wrapper writes.
+// name the wrapper writes. Millisecond precision keeps two rapid manual
+// runs from colliding even before the random tail.
 func newRunID() string {
 	runIDOnce.Do(func() {
 		runIDRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 	})
-	return fmt.Sprintf("%d-%d-%d%d",
-		time.Now().Unix(), os.Getpid(),
-		runIDRand.Int31(), runIDRand.Int31())
+	return fmt.Sprintf("%d-%04x", time.Now().UnixMilli(), runIDRand.Int31()&0xffff)
 }
 
 func init() {

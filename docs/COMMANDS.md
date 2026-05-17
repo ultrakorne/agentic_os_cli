@@ -176,13 +176,19 @@ names. Duplicate ids are dropped (first-wins) and surfaced as issues.
 
 **Human output** is a styled lipgloss table:
 ```
-╭───────────────┬───────────┬───────────────────────────┬──────────┬──────────────────┮
-│ ID            │ SECTION   │ SCHEDULE                  │ WARNINGS │ DESCRIPTION      │
-├───────────────┼───────────┼───────────────────────────┼──────────┼──────────────────┤
-│ daily_planner │ assistant │ -                         │ -        │ What did I do... │
-│ ping          │ Agents    │ mon,tue,wed,thu,fri 23:00 │ -        │ -                │
-╰───────────────┴───────────┴───────────────────────────┴──────────┴──────────────────╯
+╭───────────────┬───────────┬────────────────┬──────────┬──────────────────┮
+│ ID            │ SECTION   │ SCHEDULE       │ WARNINGS │ DESCRIPTION      │
+├───────────────┼───────────┼────────────────┼──────────┼──────────────────┤
+│ daily_planner │ assistant │ -              │ -        │ What did I do... │
+│ ping          │ Agents    │ weekdays 23:00 │ -        │ -                │
+╰───────────────┴───────────┴────────────────┴──────────┴──────────────────╯
 ```
+
+The `SCHEDULE` column collapses three common day-of-week sets for
+readability: the full week renders as `everyday`, `mon..fri` as `weekdays`,
+and `sat,sun` as `weekends`. Other combinations fall through to a literal
+comma list (e.g. `mon,wed,fri`). The collapse is **human-only** — the JSON
+`days` array is always the explicit list.
 
 Warnings are colored yellow when non-empty. Issues print to stderr after
 the table.
@@ -225,7 +231,7 @@ argument, writes the description before printing — empty string clears.
 aos describe ping
 section      Agents
 script       /.../agents/ping.sh
-schedule     mon,tue,wed,thu,fri 23:00
+schedule     weekdays 23:00
 cron         0 23 * * 1,2,3,4,5
 scheduledAt  2026-05-15T20:50:04.341Z
 description  -

@@ -33,7 +33,14 @@ export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bi
 if [ -n "$EXPLICIT_RUN_ID" ]; then
   RUN_ID="$EXPLICIT_RUN_ID"
 else
-  RUN_ID="$(date +%s)-$$-${RANDOM}${RANDOM}"
+  # mirror engine-side newRunID: <unix-millis>-<rand4>. GNU date supports
+  # %3N; BSD/macOS date leaves the specifier literal, in which case the
+  # result contains non-digits — fall back to seconds*1000.
+  MS="$(date +%s%3N)"
+  case "$MS" in
+    *[!0-9]*) MS="$(date +%s)000" ;;
+  esac
+  RUN_ID="${MS}-$(printf '%04x' "$RANDOM")"
 fi
 RUNS_DIR="$DATA_DIR/runs"
 mkdir -p "$RUNS_DIR"
