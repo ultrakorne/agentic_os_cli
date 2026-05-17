@@ -731,13 +731,20 @@ func (m *detailsModel) selectedRun() (scheduler.JobRun, bool) {
 // loadRunOutputCmd reads the .out sibling file off the main thread. The
 // viewport shows only the captured output — every other field (status,
 // elapsed, exit, trigger, startedAt) is already on the table row above, so
-// repeating the kv block here just steals space from the actual logs. A
-// run-level error (no stdout, only Error set) falls back to that text so
-// the user isn't staring at an empty pane.
+// repeating the kv block here just steals space from the actual logs.
+//
+// ReadRunOutput returns (nil, nil) when the .out file is legitimately
+// absent (running, or the run produced no output) — that's not an error,
+// just an empty pane. Any other failure (missing .json record, permission
+// denied, IO error) flows through runOutputLoadedMsg.err so the user sees
+// the actual problem instead of a misleading "(no output)".
 func (m *detailsModel) loadRunOutputCmd(r scheduler.JobRun) tea.Cmd {
 	runsDir := m.runsDir
 	return func() tea.Msg {
-		out, _ := scheduler.ReadRunOutput(runsDir, r.ID)
+		out, err := scheduler.ReadRunOutput(runsDir, r.ID)
+		if err != nil {
+			return runOutputLoadedMsg{runID: r.ID, err: err}
+		}
 		content := string(out)
 		if content == "" {
 			if r.Error != nil && *r.Error != "" {

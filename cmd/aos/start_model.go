@@ -359,6 +359,25 @@ func (m *startModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyMetaUpdate(msg.agentID, msg.meta)
 		// Don't drop msg — popup also wants to acknowledge it via the
 		// usual flow (toast clear etc.). Fall through.
+	case runChangedMsg:
+		// Watcher events MUST be handled at the parent regardless of popup
+		// state. Each watchCmd reads one event from m.events and exits; if
+		// we don't re-arm it here, no further filesystem changes get
+		// pulled into the program after a single event fires while the
+		// popup is open. We still apply the change so the underlying
+		// dashboard reflects fresh data the moment the popup closes.
+		var cmd tea.Cmd
+		if msg.runID != "" {
+			cmd = m.applyRunChange(msg.runID)
+		}
+		return m, tea.Batch(cmd, m.watchCmd())
+	case watcherErrMsg:
+		// Same re-arm rule as runChangedMsg — drop the error into a toast
+		// at the parent (popup doesn't have a watcher surface) and re-arm.
+		m.setToast(fmt.Sprintf("watcher: %v", msg.err))
+		return m, tea.Batch(m.watchErrCmd(), m.toastClearCmd())
+	case watcherClosedMsg:
+		return m, nil
 	}
 
 	if m.popup != nil {
@@ -385,20 +404,6 @@ func (m *startModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
-
-	case runChangedMsg:
-		if msg.runID != "" {
-			cmd := m.applyRunChange(msg.runID)
-			return m, tea.Batch(cmd, m.watchCmd())
-		}
-		return m, m.watchCmd()
-
-	case watcherErrMsg:
-		m.setToast(fmt.Sprintf("watcher: %v", msg.err))
-		return m, tea.Batch(m.watchErrCmd(), m.toastClearCmd())
-
-	case watcherClosedMsg:
-		return m, nil
 
 	case clearToastMsg:
 		if time.Now().After(m.toastUntil) {
