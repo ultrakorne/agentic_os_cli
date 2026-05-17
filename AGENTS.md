@@ -36,3 +36,11 @@ When adding a new verb, the runner ends with `if JSONOutput() { return printJSON
 - Errors wrap with `fmt.Errorf("context: %w", err)` so callers can `errors.Is`/`As`.
 - Keep shared package-local helpers (e.g. `sanitize`) in a neutral file like `format.go` or `style.go`, not in a command-specific file.
 - Commands that take a required positional arg (`init`, `describe`, `schedule`, `run`) use `cobra.MaximumNArgs(N)` plus a `len(args) == 0 → cmd.Help()` short-circuit so `aos <verb>` prints usage instead of a terse "accepts 1 arg(s)" error.
+
+## Reuse before building (TUI and CLI)
+
+When building anything in `cmd/aos/` — TUI screens, key handling, list rendering, footers, help, tables, progress, spinners, filtering, status formatting — **first** look at what `charm.land/bubbletea/v2`, `charm.land/bubbles/v2` (`list`, `viewport`, `help`, `key`, `paginator`, `spinner`, `progress`, `textinput`, `table`), and `charm.land/lipgloss/v2` already provide. Prefer composing those over hand-rolling.
+
+Do not introduce bespoke equivalents — custom scrollers, custom filter inputs, hand-drawn borders, manual key dispatchers, ad-hoc help footers — without asking first. Surface the choice to the human, name what's available in the framework, and explain why a bespoke piece is justified. They decide.
+
+This applies to every file under `cmd/aos/`, not just the TUI: tables go through the shared helpers in `style.go`, JSON branches go through `printJSON`, status colors come from `statusStyle`, and so on.

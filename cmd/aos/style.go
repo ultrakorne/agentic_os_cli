@@ -90,13 +90,6 @@ func statusStyle(status string) lipgloss.Style {
 // word-wraps the widest column(s) into multiple lines instead of breaking
 // the border. Tables that fit comfortably are left tight to content (no
 // stretching).
-//
-// Caveat: lipgloss (through v2.0.3) has a corner case in its resize logic.
-// When the table's natural-without-borders width is ≤ termW but its width
-// *with* borders exceeds termW, neither the shrink nor the expand path
-// adjusts anything — the table renders at natural width and the terminal
-// clips the right edge. The visible overflow is bounded by (cols + 1) chars
-// and we accept it until the upstream fix lands.
 func newTable(headers []string, rows [][]string) *table.Table {
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
