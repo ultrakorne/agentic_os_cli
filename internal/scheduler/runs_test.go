@@ -28,8 +28,24 @@ func writeRunMeta(t *testing.T, dir, id, jobID, startedAt, status string) {
   "exitCode": null,
   "outputPath": %q
 }`, id, jobID, startedAt, status, id+".out")
-	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o644); err != nil {
-		t.Fatalf("write meta: %v", err)
+	atomicWriteFile(t, filepath.Join(dir, id+".json"), []byte(body))
+}
+
+// atomicWriteFile mirrors the production wrapper's contract: write to a
+// sibling .tmp and rename on top of the target so a concurrent reader sees
+// either the old bytes or the new bytes, never a truncated mid-write. Tests
+// that overwrite a run record while another goroutine is polling rely on
+// this — plain os.WriteFile uses O_TRUNC and exposes a 0-byte window that
+// makes WaitForRun's poller occasionally observe an empty JSON file.
+func atomicWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		t.Fatalf("rename %s -> %s: %v", tmp, path, err)
 	}
 }
 
@@ -56,9 +72,7 @@ func writeFinishedRunMetaStatus(t *testing.T, dir, id, jobID, startedAt, endedAt
   "exitCode": %d,
   "outputPath": %q
 }`, id, jobID, startedAt, endedAt, status, exitCode, id+".out")
-	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o644); err != nil {
-		t.Fatalf("write meta: %v", err)
-	}
+	atomicWriteFile(t, filepath.Join(dir, id+".json"), []byte(body))
 }
 
 // TestReadRun_returnsNotFound ensures FileRunStore.Get surfaces a typed

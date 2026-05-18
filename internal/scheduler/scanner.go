@@ -39,7 +39,7 @@ type Agent struct {
 }
 
 type ScanIssue struct {
-	Kind string // "duplicate", "not-executable"
+	Kind string // "duplicate", "not-executable", "meta-unreadable"
 	Path string
 	Note string
 }
@@ -142,7 +142,19 @@ func collectInto(dir, section string, res *ScanResult, seen map[string]string) e
 		}
 		seen[id] = full
 		metaPath := filepath.Join(dir, id+metaSuffix)
-		meta := readMeta(metaPath)
+		meta, err := ReadMeta(metaPath)
+		if err != nil {
+			// A sidecar that exists but can't be read (permission denied,
+			// I/O error) shouldn't silently drop the agent's metadata —
+			// emit an issue so the operator sees it. The agent still gets
+			// listed with an empty Meta; refresh.go will skip scheduling
+			// because Meta.Schedule is nil.
+			res.Issues = append(res.Issues, ScanIssue{
+				Kind: "meta-unreadable",
+				Path: metaPath,
+				Note: err.Error(),
+			})
+		}
 		res.Agents = append(res.Agents, Agent{
 			ID:         id,
 			ScriptPath: full,
@@ -176,10 +188,3 @@ func hasShebang(path string) (bool, error) {
 	return n == 2 && buf[0] == '#' && buf[1] == '!', nil
 }
 
-func readMeta(path string) AgentMeta {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return AgentMeta{}
-	}
-	return ParseMeta(data)
-}

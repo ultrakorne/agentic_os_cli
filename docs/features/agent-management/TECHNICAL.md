@@ -2,7 +2,9 @@
 
 ## Architecture
 
-Three verbs in `cmd/aos/` (`list.go`, `describe.go`, `schedule.go`) compose against one shared scanner and one shared sidecar store in `internal/scheduler/`. The scanner produces a flat `ScanResult` (agents + issues); the sidecar store reads/writes `<id>.meta.json` atomically. JSON branches go through a single `agentRecord(...)` helper in `cmd/aos/format.go` so `aos list` items and `aos describe` records share one shape. `aos schedule` calls `RunRefresh()` (from the scheduler feature) in-process after a successful write.
+Three verbs in `cmd/aos/` (`list.go`, `describe.go`, `schedule.go`) compose against one shared scanner and one shared sidecar store in `internal/scheduler/`. The scanner produces a flat `ScanResult` (agents + issues); the sidecar store (`meta_store.go`) owns **both** reads (`ReadMeta`) and writes (`WriteSchedule`, `WriteDescription`) of `<id>.meta.json`, plus the atomic-rename + empty-file-deletion invariants. The scanner reads each agent's sidecar via `ReadMeta`, so there is one read path for the whole codebase. JSON branches go through a single `agentRecord(...)` helper in `cmd/aos/format.go` so `aos list` items and `aos describe` records share one shape. `aos schedule` calls `RunRefresh()` (from the scheduler feature) in-process after a successful write.
+
+The TUI popup (`cmd/aos/start_details.go`) consumes the `AgentMeta` returned by `WriteSchedule`/`WriteDescription` directly when the user saves — no rescan needed. The parent dashboard mirrors the update through `agentMetaUpdatedMsg` in `start_model.go:applyMetaUpdate`.
 
 ## Source Files
 
@@ -14,10 +16,10 @@ Three verbs in `cmd/aos/` (`list.go`, `describe.go`, `schedule.go`) compose agai
 | `cmd/aos/schedule_test.go` | Flag-conflict + days-parsing tests |
 | `cmd/aos/format.go` | `sanitize` + `agentRecord` (the canonical per-agent JSON shape) |
 | `cmd/aos/format_test.go` | `agentRecord` shape tests |
-| `internal/scheduler/scanner.go` | Directory walk, extension/shebang gating, executability check, duplicate detection |
-| `internal/scheduler/scanner_test.go` | Scanner rules tests (extensions, sections, duplicates, hidden files) |
-| `internal/scheduler/spec.go` | `Weekday`, `ScheduleSpec`, `AgentMeta` types; `CompileToCron`; `ParseMeta` |
-| `internal/scheduler/meta_store.go` | `ReadMeta`, `WriteSchedule`, `WriteDescription`, `SpecsEqual`; empty-meta deletion |
+| `internal/scheduler/scanner.go` | Directory walk, extension/shebang gating, executability check, duplicate detection; delegates sidecar reads to `meta_store.ReadMeta` |
+| `internal/scheduler/scanner_test.go` | Scanner rules tests (extensions, sections, duplicates, hidden files, unreadable meta) |
+| `internal/scheduler/spec.go` | `Weekday`, `ScheduleSpec`, `AgentMeta` types; `CompileToCron`; `ParseMeta` (pure bytes-→-struct) |
+| `internal/scheduler/meta_store.go` | Single sidecar I/O point: `ReadMeta`, `WriteSchedule`, `WriteDescription`, `SpecsEqual`; atomic write, empty-meta deletion |
 | `internal/scheduler/meta_store_test.go` | Sidecar round-trip + `scheduledAt` bump-on-change semantics |
 | `internal/scheduler/lookup.go` | `FindAgentByID` (used by `describe` and `schedule`); `NotFoundError` |
 
@@ -44,13 +46,14 @@ All fields are optional. `schedule.kind` is either `"hourly"` (carrying `everyHo
 ### Scanner output (`ScanResult`)
 
 - `Agents []Agent` — one entry per discovered script, sorted by `ID`. Each `Agent` carries `ID`, `ScriptPath`, `Section`, `MetaPath`, `Meta`, and `Warnings` (currently only `"not-executable"`).
-- `Issues []ScanIssue` — non-fatal problems (`duplicate`). Surfaced on stderr / in JSON but don't fail the scan.
+- `Issues []ScanIssue` — non-fatal problems. Kinds: `"duplicate"` (same id in two sections, first wins), `"meta-unreadable"` (sidecar exists but can't be read — permission denied or I/O error; the agent stays in `Agents` with an empty `Meta`). Surfaced on stderr / in JSON but don't fail the scan.
 
 ## Noteworthy Behavior
 
 - **`scheduledAt` bumps only when the schedule's *meaning* changes.** `SpecsEqual` compares day lists as sets — `["mon","wed"]` and `["wed","mon"]` are equal — so reordering the array doesn't count. Title/description edits don't bump it either. This lets downstream tools reason about "how long has this schedule been in effect."
 - **Empty meta gets unlinked.** `writeMetaJSON` checks `isEmptyMeta` (all four fields zero) before writing; an empty result deletes the file instead of leaving `{}` on disk. So `aos schedule x --off` *and* `aos describe x ""` together leave the agent with no sidecar at all.
 - **Sidecar writes are atomic.** `writeMetaJSON` writes to `<path>.tmp` and `os.Rename`s on top of the target. A crash never leaves a half-written sidecar; a concurrent reader sees either the old or the new file, never garbage.
+- **One read path for sidecars.** `meta_store.ReadMeta(path)` is the only place that turns `<id>.meta.json` bytes into an `AgentMeta`: missing file → empty meta, no error; permission/I/O error → empty meta plus an error. The scanner calls into it (it does not re-implement reads). Write helpers (`WriteSchedule`, `WriteDescription`) return the resulting `AgentMeta` so callers — including the TUI popup — can update in-memory state without re-scanning.
 - **Day-set humanization is human-only.** `humanizeDays` in `list.go` collapses three canonical sets — `mon..fri` → `weekdays`, `sat,sun` → `weekends`, full week → `everyday`. The JSON payload always carries the explicit array.
 - **Hidden files and `__-prefixed` ids are skipped.** Dotfiles, `readme.md`, and any sidecar files (`*.meta.json`) are filtered out. Ids starting with `__` are reserved for managed cron entries (e.g. `__tick__`) and are dropped from scan results so a user can't accidentally collide with them.
 - **Shebang fallback for extensionless files.** A file without an extension is included if its first two bytes are `#!`. This lets a user drop a Python or Node script with just `agents/cleanup` and a `#!/usr/bin/env python3` first line, no `.sh` rename needed.

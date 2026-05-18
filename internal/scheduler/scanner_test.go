@@ -146,6 +146,41 @@ func TestScanAgents_duplicateIDsAcrossSections(t *testing.T) {
 	}
 }
 
+func TestScanAgents_unreadableMetaEmitsIssue(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses unix file mode permission checks")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "blocked.sh")
+	writeScript(t, script, "#!/usr/bin/env bash\necho hi\n", true)
+	meta := filepath.Join(dir, "blocked.meta.json")
+	if err := os.WriteFile(meta, []byte(`{"description":"x"}`), 0o000); err != nil {
+		t.Fatalf("write meta: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(meta, 0o644) })
+
+	res, err := ScanAgents(dir)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(res.Agents) != 1 || res.Agents[0].ID != "blocked" {
+		t.Fatalf("expected agent 'blocked' still listed, got %+v", res.Agents)
+	}
+	if (res.Agents[0].Meta != AgentMeta{}) {
+		t.Fatalf("expected empty Meta on unreadable sidecar, got %+v", res.Agents[0].Meta)
+	}
+	var found bool
+	for _, iss := range res.Issues {
+		if iss.Kind == "meta-unreadable" && iss.Path == meta {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected meta-unreadable issue for %s, got %+v", meta, res.Issues)
+	}
+}
+
 func TestScanAgents_agentsAreSortedByID(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.sh")

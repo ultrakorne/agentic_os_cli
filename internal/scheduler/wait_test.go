@@ -17,7 +17,9 @@ func storeFor(dir string) *FileRunStore {
 }
 
 // writeRunMetaWithExit writes a finished record (status from caller, optional
-// exit code) so WaitForRun can observe a terminal state.
+// exit code) so WaitForRun can observe a terminal state. Goes through
+// atomicWriteFile so an overwrite (e.g. running → success) never exposes a
+// 0-byte truncated window to a concurrent poller.
 func writeTerminalRunMeta(t *testing.T, dir, id, status string, exitCode int) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -36,9 +38,7 @@ func writeTerminalRunMeta(t *testing.T, dir, id, status string, exitCode int) {
   "exitCode": %d,
   "outputPath": %q
 }`, id, status, exitCode, id+".out")
-	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o644); err != nil {
-		t.Fatalf("write meta: %v", err)
-	}
+	atomicWriteFile(t, filepath.Join(dir, id+".json"), []byte(body))
 }
 
 // TestWaitForRun_toleratesMissingInitialRecord: the wrapper takes ~100ms to
