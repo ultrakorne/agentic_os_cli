@@ -363,17 +363,19 @@ aos run <id> --wait           # spawn, then block until done; prints .out on std
 aos run <id> --wait --json    # spawn, print stub JSON, block, then append .out
 ```
 
-Looks up the agent by id, estimates duration from the newest completed runs
+Looks up the agent by id, estimates duration from the newest successful runs
 for that agent (up to 10), mints a run id (`<unix>-<pid>-<rand><rand>`),
 spawns `wrapper.sh` detached (`setsid`) with `AGENTIC_OS_TRIGGER=manual` and
 the explicit run id as the wrapper's 5th argv, then prints a `Run` stub.
 The wrapper writes the final record under `<aos_home>/runs/<run-id>.json`
 once the script exits — poll for it (or watch the file) to see the result.
 
-The estimate uses completed records with parseable `startedAt` and `endedAt`.
-If the agent has no completed history, human output prints `estimate  none`
-and JSON prints `"estimate": -1`. Otherwise JSON `estimate` is the average
-elapsed time in milliseconds.
+The estimate uses only `success` records with parseable `startedAt` and
+`endedAt` — `error`, `running`, and `missed` runs are skipped so a
+fast-failing script doesn't drag the ETA below the typical successful
+runtime. If the agent has no successful history, human output prints
+`estimate  none` and JSON prints `"estimate": -1`. Otherwise JSON
+`estimate` is the average elapsed time in milliseconds.
 
 Errors exit non-zero with the message on stderr: missing agent, wrapper
 absent / not executable.

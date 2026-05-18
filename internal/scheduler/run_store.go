@@ -154,8 +154,10 @@ func (s *FileRunStore) Output(id string) ([]byte, error) {
 	return data, nil
 }
 
-// EstimateDuration averages elapsed time of the newest completed runs for
-// agentID, capped at sample. Runs without a parseable endedAt are ignored.
+// EstimateDuration averages elapsed time of the newest successful runs for
+// agentID, capped at sample. Only StatusSuccess records contribute — error,
+// running, and missed runs are skipped so a fast-failing script doesn't drag
+// the ETA below the typical successful runtime.
 func (s *FileRunStore) EstimateDuration(agentID string, sample int) (time.Duration, bool, error) {
 	runs, err := s.List(Filter{AgentID: agentID})
 	if err != nil {
@@ -166,6 +168,9 @@ func (s *FileRunStore) EstimateDuration(agentID string, sample int) (time.Durati
 	for _, r := range runs {
 		if sample > 0 && count >= sample {
 			break
+		}
+		if r.Status != StatusSuccess {
+			continue
 		}
 		if r.EndedAt == nil || *r.EndedAt == "" {
 			continue

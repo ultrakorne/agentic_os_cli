@@ -8,7 +8,7 @@ The "spawn a wrapper and look at the result" surface. `aos run` fires a manual r
 
 ### `aos run <id>` (default)
 
-Looks up the agent by id, estimates duration from up to 10 newest completed runs, mints a run id, spawns `wrapper.sh` detached (`setsid`) with `AGENTIC_OS_TRIGGER=manual` and the explicit run id as argv[5], then prints a Run stub on stdout and exits. The wrapper writes the terminal record (`success` / `error`) under `<aos_home>/runs/<run-id>.json` once the script exits; the operator polls or watches for that file.
+Looks up the agent by id, estimates duration from up to 10 newest **successful** runs (error/running/missed runs are skipped so a fast-failing script doesn't pull the ETA down), mints a run id, spawns `wrapper.sh` detached (`setsid`) with `AGENTIC_OS_TRIGGER=manual` and the explicit run id as argv[5], then prints a Run stub on stdout and exits. The wrapper writes the terminal record (`success` / `error`) under `<aos_home>/runs/<run-id>.json` once the script exits; the operator polls or watches for that file.
 
 ### `aos run <id> --wait`
 

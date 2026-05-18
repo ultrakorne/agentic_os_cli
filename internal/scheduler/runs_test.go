@@ -35,6 +35,11 @@ func writeRunMeta(t *testing.T, dir, id, jobID, startedAt, status string) {
 
 func writeFinishedRunMeta(t *testing.T, dir, id, jobID, startedAt, endedAt string) {
 	t.Helper()
+	writeFinishedRunMetaStatus(t, dir, id, jobID, startedAt, endedAt, "success", 0)
+}
+
+func writeFinishedRunMetaStatus(t *testing.T, dir, id, jobID, startedAt, endedAt, status string, exitCode int) {
+	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -45,12 +50,12 @@ func writeFinishedRunMeta(t *testing.T, dir, id, jobID, startedAt, endedAt strin
   "trigger": "manual",
   "startedAt": %q,
   "endedAt": %q,
-  "status": "success",
+  "status": %q,
   "output": "",
   "error": null,
-  "exitCode": 0,
+  "exitCode": %d,
   "outputPath": %q
-}`, id, jobID, startedAt, endedAt, id+".out")
+}`, id, jobID, startedAt, endedAt, status, exitCode, id+".out")
 	if err := os.WriteFile(filepath.Join(dir, id+".json"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write meta: %v", err)
 	}

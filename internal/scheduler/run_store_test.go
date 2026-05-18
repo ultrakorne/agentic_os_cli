@@ -217,6 +217,42 @@ func TestFileRunStore_EstimateDurationNoSamples(t *testing.T) {
 	}
 }
 
+// A fast-failing error run must not drag the estimate below the true
+// success runtime — only StatusSuccess records contribute to the average.
+func TestFileRunStore_EstimateDurationSkipsErrors(t *testing.T) {
+	s, dir := newFileStore(t)
+	writeFinishedRunMeta(t, dir, "ok1", "ping", "2026-05-16T13:00:00.000Z", "2026-05-16T13:00:10.000Z")
+	writeFinishedRunMeta(t, dir, "ok2", "ping", "2026-05-16T13:01:00.000Z", "2026-05-16T13:01:10.000Z")
+	writeFinishedRunMetaStatus(t, dir, "bad", "ping", "2026-05-16T13:02:00.000Z", "2026-05-16T13:02:00.500Z", "error", 1)
+
+	got, ok, err := s.EstimateDuration("ping", 10)
+	if err != nil {
+		t.Fatalf("EstimateDuration: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected estimate")
+	}
+	if got != 10*time.Second {
+		t.Errorf("estimate = %s, want 10s (error run must be excluded)", got)
+	}
+}
+
+// When the only history is failed runs, EstimateDuration reports "no
+// samples" rather than averaging error durations.
+func TestFileRunStore_EstimateDurationOnlyErrors(t *testing.T) {
+	s, dir := newFileStore(t)
+	writeFinishedRunMetaStatus(t, dir, "bad1", "ping", "2026-05-16T13:00:00.000Z", "2026-05-16T13:00:01.000Z", "error", 1)
+	writeFinishedRunMetaStatus(t, dir, "bad2", "ping", "2026-05-16T13:01:00.000Z", "2026-05-16T13:01:01.000Z", "error", 1)
+
+	got, ok, err := s.EstimateDuration("ping", 10)
+	if err != nil {
+		t.Fatalf("EstimateDuration: %v", err)
+	}
+	if ok || got != 0 {
+		t.Errorf("estimate = %s, %v; want 0, false", got, ok)
+	}
+}
+
 func TestFileRunStore_NewIDShape(t *testing.T) {
 	s, _ := newFileStore(t)
 	id := s.NewID()
