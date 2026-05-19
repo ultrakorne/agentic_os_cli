@@ -1,17 +1,23 @@
 CLI to schedule, run and manage local agents (just scripts in your filesystem)
+If you pc is turned off, the agent will run soon after automatically (can turn off by config)
+
 Also include a tui, just run `aos`
+
+<img width="780" height="426" alt="image" src="https://github.com/user-attachments/assets/8257f8b0-f98f-4a81-ad59-0f7a81827281" />
+
+
+<img width="1095" height="190" alt="image" src="https://github.com/user-attachments/assets/a45674e6-45de-4a0c-bfe1-4c8363422a24" />
+
 
 ## Install
 
-One-liner that grabs the latest release
+One-liner that grabs the latest release, linux and mac.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ultrakorne/agentic_os_cli/master/scripts/install-release.sh | bash
 ```
 
-(For a system-wide path like `/usr/local/bin`, prefix the command with `sudo` and pass `-E` so the env vars survive: `... | sudo -E env BIN_DIR=/usr/local/bin bash`.)
-
-Supported targets: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64. The script refuses to run without a SHA-256 verifier (`sha256sum` or `shasum`).
+(For a system-wide path like `/usr/local/bin` replace after the pipe with `... | sudo -E env BIN_DIR=/usr/local/bin bash`.)
 
 After reinstalling to a different path, run `aos refresh` to rebuild the crontab line against the new binary location.
 
