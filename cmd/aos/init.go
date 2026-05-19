@@ -14,6 +14,7 @@ import (
 
 	"github.com/ultrakorne/aos_cli/internal/config"
 	"github.com/ultrakorne/aos_cli/internal/resources"
+	"github.com/ultrakorne/aos_cli/internal/scheduler"
 )
 
 var initCmd = &cobra.Command{
@@ -72,10 +73,11 @@ func initFunc(cmd *cobra.Command, args []string) {
 		fail("write config: %v", err)
 	}
 
-	refresh, err := RunRefresh()
+	refresh, err := runRefresh()
 	if err != nil {
 		fail("refresh: %v", err)
 	}
+	emitWarnings(refresh.Warnings)
 
 	if JSONOutput() {
 		if err := printJSON(map[string]any{
@@ -119,7 +121,7 @@ func mergeInitConfig(existing *config.Config, target string) *config.Config {
 // printInitHuman emits a small key/value block plus the refresh summary so
 // the user sees both what `init` itself did (relocation mode, wrapper state)
 // and the downstream cron reconciliation in one glance.
-func printInitHuman(mode, target, wrapperState string, refresh RefreshSummary) {
+func printInitHuman(mode, target, wrapperState string, refresh scheduler.RefreshOutcome) {
 	banner("init")
 	printKV([]kvRow{
 		{Key: "mode", Value: mode},

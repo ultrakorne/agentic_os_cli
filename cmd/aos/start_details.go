@@ -679,7 +679,7 @@ func (m *detailsModel) saveAll() (*detailsModel, tea.Cmd) {
 	cmds = append(cmds, func() tea.Msg {
 		return agentMetaUpdatedMsg{agentID: agentID, meta: meta}
 	})
-	// Reconcile cron in the background — RunRefresh shells out to crontab
+	// Reconcile cron in the background — runRefresh shells out to crontab
 	// and re-scans every agent meta. Surfacing the result via a tea.Msg
 	// keeps the UI responsive on slow systems.
 	if schedChanged {
@@ -688,7 +688,7 @@ func (m *detailsModel) saveAll() (*detailsModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// refreshDoneMsg carries the outcome of an async RunRefresh kicked off from
+// refreshDoneMsg carries the outcome of an async refresh kicked off from
 // the popup save flow. The popup updates its toast on receipt.
 type refreshDoneMsg struct {
 	err error
@@ -696,7 +696,7 @@ type refreshDoneMsg struct {
 
 func refreshScheduleCmd() tea.Cmd {
 	return func() tea.Msg {
-		_, err := RunRefresh()
+		_, err := runRefresh()
 		return refreshDoneMsg{err: err}
 	}
 }

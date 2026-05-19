@@ -1,4 +1,4 @@
-package main
+package scheduler
 
 import (
 	"bufio"
@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/ultrakorne/aos_cli/internal/scheduler"
 )
 
 // installFakeWrapper drops a tiny bash wrapper at <aosHome>/wrapper.sh that
@@ -29,7 +27,7 @@ func installFakeWrapper(t *testing.T, aosHome string) string {
 	return log
 }
 
-func writeRunFile(t *testing.T, runsDir string, run scheduler.Run) {
+func writeRunFile(t *testing.T, runsDir string, run Run) {
 	t.Helper()
 	if err := os.MkdirAll(runsDir, 0o755); err != nil {
 		t.Fatalf("mkdir runs: %v", err)
@@ -82,30 +80,33 @@ func TestFireCatchups_spawnsForMissedLatest(t *testing.T) {
 	}
 
 	missedSlot := "2026-05-17T11:00:00Z"
-	writeRunFile(t, filepath.Join(aosHome, "runs"), scheduler.Run{
+	writeRunFile(t, filepath.Join(aosHome, "runs"), Run{
 		ID:        "miss-ping-2026-05-17T11-00-00Z",
-		AgentID:     "ping",
+		AgentID:   "ping",
 		StartedAt: missedSlot,
-		Status:    scheduler.StatusMissed,
+		Status:    StatusMissed,
 		Trigger:   "schedule",
 	})
 
-	agents := []scheduler.Agent{{
+	agents := []Agent{{
 		ID:         "ping",
 		ScriptPath: scriptPath,
-		Meta: scheduler.AgentMeta{
-			Schedule: &scheduler.ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 0},
+		Meta: AgentMeta{
+			Schedule: &ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 0},
 		},
 	}}
 
-	store := scheduler.NewFileRunStore(aosHome)
+	store := NewFileRunStore(aosHome)
 	runs, err := store.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	fired, err := fireCatchups(aosHome, store, agents, runs)
+	fired, warns, err := fireCatchups(aosHome, store, agents, runs)
 	if err != nil {
 		t.Fatalf("fireCatchups: %v", err)
+	}
+	if len(warns) != 0 {
+		t.Errorf("unexpected warnings: %v", warns)
 	}
 	if fired != 1 {
 		t.Fatalf("fired = %d, want 1", fired)
@@ -139,35 +140,35 @@ func TestFireCatchups_noopWhenLatestIsCompleted(t *testing.T) {
 	}
 
 	runsDir := filepath.Join(aosHome, "runs")
-	writeRunFile(t, runsDir, scheduler.Run{
+	writeRunFile(t, runsDir, Run{
 		ID:        "miss-ping",
-		AgentID:     "ping",
+		AgentID:   "ping",
 		StartedAt: "2026-05-17T11:00:00Z",
-		Status:    scheduler.StatusMissed,
+		Status:    StatusMissed,
 		Trigger:   "schedule",
 	})
-	writeRunFile(t, runsDir, scheduler.Run{
+	writeRunFile(t, runsDir, Run{
 		ID:        "later-success",
-		AgentID:     "ping",
+		AgentID:   "ping",
 		StartedAt: "2026-05-17T11:30:00Z",
-		Status:    scheduler.StatusSuccess,
+		Status:    StatusSuccess,
 		Trigger:   "schedule",
 	})
 
-	agents := []scheduler.Agent{{
+	agents := []Agent{{
 		ID:         "ping",
 		ScriptPath: scriptPath,
-		Meta: scheduler.AgentMeta{
-			Schedule: &scheduler.ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 0},
+		Meta: AgentMeta{
+			Schedule: &ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 0},
 		},
 	}}
 
-	store := scheduler.NewFileRunStore(aosHome)
+	store := NewFileRunStore(aosHome)
 	runs, err := store.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	fired, err := fireCatchups(aosHome, store, agents, runs)
+	fired, _, err := fireCatchups(aosHome, store, agents, runs)
 	if err != nil {
 		t.Fatalf("fireCatchups: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestFireCatchups_missingWrapperReportsError(t *testing.T) {
 	}
 	// No wrapper.sh on disk.
 
-	if _, err := fireCatchups(aosHome, scheduler.NewFileRunStore(aosHome), nil, nil); err == nil {
+	if _, _, err := fireCatchups(aosHome, NewFileRunStore(aosHome), nil, nil); err == nil {
 		t.Error("fireCatchups returned nil error despite missing wrapper")
 	}
 }

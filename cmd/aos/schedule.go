@@ -77,10 +77,12 @@ func runSchedule(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("write meta: %w", err)
 	}
 
-	refresh, refErr := RunRefresh()
+	refresh, refErr := runRefresh()
 	if refErr != nil {
 		// Surface the write but let the user know cron didn't reconcile.
 		fmt.Fprintf(os.Stderr, "warn: refresh after schedule write failed: %v\n", refErr)
+	} else {
+		emitWarnings(refresh.Warnings)
 	}
 
 	if JSONOutput() {
@@ -242,7 +244,7 @@ func parseDay(raw string) (scheduler.Weekday, error) {
 	return scheduler.Weekday(s), nil
 }
 
-func printScheduleHuman(id string, meta scheduler.AgentMeta, refresh RefreshSummary, refErr error) error {
+func printScheduleHuman(id string, meta scheduler.AgentMeta, refresh scheduler.RefreshOutcome, refErr error) error {
 	banner("schedule " + id)
 	if meta.Schedule == nil {
 		clearedStyle := styleMuted
@@ -280,7 +282,7 @@ func printScheduleHuman(id string, meta scheduler.AgentMeta, refresh RefreshSumm
 	return nil
 }
 
-func printScheduleJSON(id string, meta scheduler.AgentMeta, refresh RefreshSummary, refErr error) error {
+func printScheduleJSON(id string, meta scheduler.AgentMeta, refresh scheduler.RefreshOutcome, refErr error) error {
 	payload := map[string]any{
 		"id":          id,
 		"schedule":    meta.Schedule,
