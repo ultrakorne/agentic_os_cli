@@ -1,8 +1,5 @@
-# aos
-
-Go CLI that installs and manages the agentic_os runtime: writes `wrapper.sh`
-into your aos home, reconciles your user crontab from agent definitions, and
-ticks the scheduler.
+CLI to schedule, run and manage local agents (just scripts in your filesystem)
+Also include a tui, just run `aos`
 
 ## Install
 
