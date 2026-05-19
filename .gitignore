@@ -1,6 +1,9 @@
 # Built binaries
 /aos
 
+# goreleaser output
+/dist/
+
 # Go build cache
 *.test
 *.out

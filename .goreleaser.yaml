@@ -1,0 +1,61 @@
+# goreleaser config for the `aos` binary. Tagged releases on GitHub are
+# built and published by .github/workflows/release.yml.
+#
+# Still to wire up before distribution beyond GitHub releases:
+#   - homebrew tap (see commented `brews:` block below)
+
+version: 2
+
+project_name: aos
+
+builds:
+  - id: aos
+    binary: aos
+    main: ./cmd/aos
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/ultrakorne/aos_cli/internal/build.Version=v{{.Version}}
+      - -X github.com/ultrakorne/aos_cli/internal/build.Commit={{.ShortCommit}}
+      - -X github.com/ultrakorne/aos_cli/internal/build.Date={{.Date}}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: aos
+    ids: [aos]
+    name_template: "aos_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: ultrakorne
+    name: agentic_os_cli
+
+# Homebrew distribution — uncomment once a tap exists.
+# brews:
+#   - repository:
+#       owner: ultrakorne
+#       name: homebrew-tap
+#     homepage: https://github.com/ultrakorne/agentic_os_cli
+#     description: CLI that installs and manages the agentic_os runtime

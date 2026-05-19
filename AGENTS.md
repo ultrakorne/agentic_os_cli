@@ -1,11 +1,7 @@
 # AGENTS.md
 
 Go CLI (`aos`) that installs and manages the agentic_os runtime: writes `wrapper.sh` into the user's home, reconciles the crontab from agent definitions, and ticks the scheduler.
-
-## Start here
-
-- The Electron dashboard lives in a sibling repo (`ultrakorne/agentic_os_app` on GitHub; typically checked out next to this one as `../agentic_os_app/`). It is a pure view over the runtime this CLI manages.
-- This CLI owns the runtime — wrapper, crontab block, scheduler tick. The dashboard never writes runtime state directly; it shells out to `aos`.
+This CLI owns the runtime — wrapper, crontab block, scheduler tick. The dashboard never writes runtime state directly; it shells out to `aos`.
 
 ## Code layout
 
