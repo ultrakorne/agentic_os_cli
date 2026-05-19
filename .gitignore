@@ -1,0 +1,19 @@
+# Built binaries
+/aos
+
+# Go build cache
+*.test
+*.out
+coverage.out
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+
+# Local agent configs
+.claude/settings.local.json
+.claude/worktrees
+.mcp.json
+opencode.jsonc
+.antigravitycli

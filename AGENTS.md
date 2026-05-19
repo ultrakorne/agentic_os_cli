@@ -2,6 +2,11 @@
 
 Go CLI (`aos`) that installs and manages the agentic_os runtime: writes `wrapper.sh` into the user's home, reconciles the crontab from agent definitions, and ticks the scheduler.
 
+## Start here
+
+- The Electron dashboard lives in a sibling repo (`ultrakorne/agentic_os_app` on GitHub; typically checked out next to this one as `../agentic_os_app/`). It is a pure view over the runtime this CLI manages.
+- This CLI owns the runtime — wrapper, crontab block, scheduler tick. The dashboard never writes runtime state directly; it shells out to `aos`.
+
 ## Code layout
 
 - `cmd/aos/` — cobra subcommands (`init`, `list`, `describe`, `schedule`, `run`, `runs`, `refresh`, `tick`, `uninstall`, `home`) plus shared package-local helpers in `format.go` (`sanitize`, `agentRecord`) and `style.go` (lipgloss palette, `printJSON`, `printKV`, `newTable`, `banner`, `statusStyle`)
@@ -23,7 +28,7 @@ go vet ./...                # static checks
 Every verb has two output modes, and **every new verb must implement both**:
 
 - **Human (default)** — styled with [lipgloss](https://github.com/charmbracelet/lipgloss) for a clean terminal view: rounded-border tables for listings, right-aligned key/value blocks for single records, colored status / health fields, accent-banner per command. Never write raw `tabwriter` rows or inline ANSI escapes — use the shared helpers in `cmd/aos/style.go`: `banner`, `printKV`, `newTable`, `statusStyle`, plus the `style*` / `color*` palette. Lipgloss auto-detects the terminal's color profile via termenv and strips styling when stdout isn't a TTY, so piping/redirecting still produces clean text.
-- **`--json` (clients and agents)** — a persistent root flag (`JSONOutput()`); the Electron app and any scripted agent consumes this. Every `--json` branch must go through `printJSON` so indentation and trailing-newline behavior stay uniform. **The JSON shape is the contract**: restyle the human output freely, but don't rename or retype `--json` fields without bumping the consumers (Electron `src/shared/scheduler.ts`, agent integrations).
+- **`--json` (clients and agents)** — a persistent root flag (`JSONOutput()`); the Electron app and any scripted agent consumes this. Every `--json` branch must go through `printJSON` so indentation and trailing-newline behavior stay uniform. **The JSON shape is the contract**: restyle the human output freely, but don't rename or retype `--json` fields without bumping the consumers (the sibling app's `src/shared/scheduler.ts`, agent integrations).
 
 When adding a new verb, the runner ends with `if JSONOutput() { return printJSON(payload) }; return printHumanFn(payload)` — never just one or the other.
 
