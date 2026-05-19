@@ -146,6 +146,56 @@ func TestDetectMissed_ignoresSlotsBeforeScheduledAt(t *testing.T) {
 	}
 }
 
+func TestDetectMissed_cronWalkUsesLocalTime(t *testing.T) {
+	// The OS crontab daemon interprets cron entries in local time. DetectMissed
+	// must do the same — otherwise miss detection silently disagrees with the
+	// real schedule on every non-UTC host.
+	//
+	// Setup: "daily at 09:00, Mon–Fri" on a host whose local time is UTC+2.
+	// At 09:30 local (= 07:30 UTC) the 09:00 local slot has just passed and
+	// nothing covers it. A UTC interpretation would compute the latest slot
+	// as yesterday 09:00 UTC and find it "covered" by some later run, missing
+	// today's real outage.
+	loc := time.FixedZone("test+02", 2*60*60)
+	now := time.Date(2026, 5, 19, 9, 30, 0, 0, loc) // Tue 09:30 local
+	// scheduledAt is in UTC (RFC3339 with 'Z'), like every real meta file.
+	scheduledAt := time.Date(2026, 5, 18, 12, 21, 54, 0, time.UTC)
+	a := Agent{
+		ID: "daily_planner",
+		Meta: AgentMeta{
+			Schedule: &ScheduleSpec{
+				Kind:  "daily",
+				Days:  []Weekday{Mon, Tue, Wed, Thu, Fri},
+				Hour:  9,
+				Minute: 0,
+			},
+			ScheduledAt: scheduledAt.Format(time.RFC3339Nano),
+		},
+	}
+
+	// Yesterday's 09:00 local slot was covered by a manual run at 14:22 local,
+	// matching the real-world repro on samir's box.
+	monManualLocal := time.Date(2026, 5, 18, 14, 22, 29, 0, loc)
+	runs := []Run{
+		{
+			ID:            "manual-mon",
+			AgentID:       "daily_planner",
+			StartedAt:     monManualLocal.UTC().Format(time.RFC3339Nano),
+			Status:        StatusSuccess,
+			StartedAtTime: monManualLocal,
+		},
+	}
+
+	out := DetectMissed([]Agent{a}, runs, DetectOpts{Now: now})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 miss for today 09:00 local, got %d (%+v)", len(out), out)
+	}
+	wantSlot := time.Date(2026, 5, 19, 9, 0, 0, 0, loc)
+	if !out[0].ExpectedAt.Equal(wantSlot) {
+		t.Fatalf("expected slot %v, got %v", wantSlot, out[0].ExpectedAt)
+	}
+}
+
 func TestMissedRunID_isStableAndPortable(t *testing.T) {
 	exp := time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC)
 	got := MissedRunID("ping", exp)

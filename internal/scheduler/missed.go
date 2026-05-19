@@ -87,8 +87,14 @@ func DetectMissed(agents []Agent, runs []Run, opts DetectOpts) []MissedRun {
 		// Walk forward and keep only the last slot <= now. cron/v3 has no
 		// Prev(), so we step through Next() and overwrite. The lookback
 		// floor + maxTicks bound the loop tightly.
+		//
+		// SpecSchedule.Next evaluates the cron expression in the cursor's
+		// location. The OS crontab daemon interprets entries in local time,
+		// so cursor must be local too — otherwise a `0 9 * * *` is computed
+		// at 09:00 UTC while cron fires at 09:00 local, and miss detection
+		// silently disagrees with reality on every non-UTC machine.
 		var latest time.Time
-		cursor := earliest.Add(-time.Second)
+		cursor := earliest.In(now.Location()).Add(-time.Second)
 		for i := 0; i < maxTicks; i++ {
 			next := sched.Next(cursor)
 			if next.IsZero() || next.After(now) {
