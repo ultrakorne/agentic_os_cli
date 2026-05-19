@@ -221,6 +221,19 @@ func SyncCrontab(args SyncArgs) (SyncResult, error) {
 	return SyncResult{Wrote: true}, nil
 }
 
+// MatchesTarget reports whether `current` already contains the managed block
+// SyncCrontab would write for the same args. Drift detection should call this
+// instead of reassembling the expected block from markers — so detect and sync
+// share the same comparison and cannot disagree.
+func MatchesTarget(current string, args SyncArgs) bool {
+	ex := ExtractManaged(current)
+	if ex.Conflict {
+		return false
+	}
+	next := computeNext(current, ex, args.Entries, args.WrapperPath, args.DataDir, args.TickSchedule, args.TickCommand)
+	return next == current
+}
+
 // RemoveManaged strips the managed block entirely. Returns Wrote=false when
 // no managed block was present.
 func RemoveManaged() (SyncResult, error) {

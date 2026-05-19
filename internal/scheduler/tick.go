@@ -189,9 +189,13 @@ func crontabState(dataDir string, agents []Agent, tickSchedule string) string {
 	if err != nil {
 		return "error(" + sanitizeForState(err.Error()) + ")"
 	}
-	expectedBlock := crontab.BuildManagedBlock(entries, wrapperPath, dataDir, tickSchedule, crontab.BuildTickCommand(aosBin, dataDir))
-	actualBlock := crontab.BeginMarker + "\n" + strings.Join(ex.Managed, "\n") + "\n" + crontab.EndMarker
-	if actualBlock == expectedBlock {
+	if crontab.MatchesTarget(text, crontab.SyncArgs{
+		Entries:      entries,
+		WrapperPath:  wrapperPath,
+		DataDir:      dataDir,
+		TickSchedule: tickSchedule,
+		TickCommand:  crontab.BuildTickCommand(aosBin, dataDir),
+	}) {
 		return "managed"
 	}
 	return "drift"

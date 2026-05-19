@@ -228,6 +228,63 @@ func TestComputeNextAppendsWhenNoMarker(t *testing.T) {
 	}
 }
 
+// ---------- MatchesTarget ----------
+
+func TestMatchesTargetMatchesWhatSyncWouldWrite(t *testing.T) {
+	args := SyncArgs{
+		Entries:      []Entry{{AgentID: "a", ScriptPath: "/a.sh", Expression: "* * * * *"}},
+		WrapperPath:  "/w",
+		DataDir:      "/d",
+		TickSchedule: "*/5 * * * *",
+		TickCommand:  "'/opt/aos' tick",
+	}
+	block := BuildManagedBlock(args.Entries, args.WrapperPath, args.DataDir, args.TickSchedule, args.TickCommand)
+	current := "user\n" + block + "\n"
+	if !MatchesTarget(current, args) {
+		t.Errorf("expected match, got drift")
+	}
+}
+
+func TestMatchesTargetReportsDriftOnStaleEntry(t *testing.T) {
+	args := SyncArgs{
+		Entries:     []Entry{{AgentID: "a", ScriptPath: "/a.sh", Expression: "* * * * *"}},
+		WrapperPath: "/w",
+		DataDir:     "/d",
+		TickCommand: "'/opt/aos' tick",
+	}
+	current := "user\n" + BeginMarker + "\n* * * * * stale # agentic_os:a\n" + EndMarker + "\n"
+	if MatchesTarget(current, args) {
+		t.Errorf("expected drift on stale entry, got match")
+	}
+}
+
+func TestMatchesTargetWhitespaceVarianceIsDrift(t *testing.T) {
+	// Whitespace-different blocks should still register as drift — sync would
+	// rewrite them, so detect must agree.
+	args := SyncArgs{
+		Entries:     []Entry{{AgentID: "a", ScriptPath: "/a.sh", Expression: "* * * * *"}},
+		WrapperPath: "/w",
+		DataDir:     "/d",
+		TickCommand: "'/opt/aos' tick",
+	}
+	block := BuildManagedBlock(args.Entries, args.WrapperPath, args.DataDir, "", args.TickCommand)
+	// inject trailing whitespace on the managed line
+	munged := strings.Replace(block, "agentic_os:a", "agentic_os:a   ", 1)
+	current := munged + "\n"
+	if MatchesTarget(current, args) {
+		t.Errorf("expected drift on whitespace variance, got match")
+	}
+}
+
+func TestMatchesTargetConflictNeverMatches(t *testing.T) {
+	args := SyncArgs{TickCommand: "'/opt/aos' tick"}
+	// duplicate BeginMarker → Conflict=true
+	current := BeginMarker + "\n" + BeginMarker + "\nx\n" + EndMarker + "\n"
+	if MatchesTarget(current, args) {
+		t.Errorf("conflict must never report as match")
+	}
+}
+
 // ---------- purgeAllManaged ----------
 
 func TestPurgeAllManagedRemovesBlock(t *testing.T) {
