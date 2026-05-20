@@ -84,7 +84,7 @@ func Tick(deps TickDeps) (TickOutcome, error) {
 		// reflects this tick's writes, so fireCatchups doesn't need a
 		// second load of the (potentially 2000-entry) runs/ dir.
 		store := NewFileRunStore(cfg.AosHome)
-		fired, warns, err := fireCatchups(cfg.AosHome, store, scan.Agents, runs)
+		fired, warns, err := fireCatchups(cfg.AosHome, store, scan.Agents, runs, deps.Now)
 		if err != nil {
 			// Spawn failures don't fail the tick — same posture as miss
 			// recording. The next tick retries.
@@ -119,14 +119,16 @@ func Tick(deps TickDeps) (TickOutcome, error) {
 //
 // `runs` is the post-RecordMissedRuns view of the runs/ directory — pass it
 // through from Tick so a 2000-file directory isn't walked twice per tick.
-func fireCatchups(aosHome string, store *FileRunStore, agents []Agent, runs []Run) (int, []string, error) {
+// `now` is the tick's reference time, used by DetectCatchups to enforce a
+// quiet window after a missed slot (see MinCatchupSlotAge).
+func fireCatchups(aosHome string, store *FileRunStore, agents []Agent, runs []Run, now time.Time) (int, []string, error) {
 	wrapperPath := filepath.Join(aosHome, "wrapper.sh")
 	if !runtime.FileExists(wrapperPath) || !runtime.IsExecutable(wrapperPath) {
 		// Mirrors aos run's posture: without a usable wrapper we can't spawn
 		// anything. Treat as a soft error so the tick's other work still lands.
 		return 0, nil, fmt.Errorf("%s missing or not executable", wrapperPath)
 	}
-	candidates := DetectCatchups(agents, runs)
+	candidates := DetectCatchups(agents, runs, now)
 	var warnings []string
 	fired := 0
 	for _, c := range candidates {

@@ -101,7 +101,10 @@ func TestFireCatchups_spawnsForMissedLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	fired, warns, err := fireCatchups(aosHome, store, agents, runs)
+	// missedSlot is 11:00:00Z; pick a `now` well past MinCatchupSlotAge so
+	// the quiet window doesn't gate this integration case.
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	fired, warns, err := fireCatchups(aosHome, store, agents, runs, now)
 	if err != nil {
 		t.Fatalf("fireCatchups: %v", err)
 	}
@@ -168,7 +171,8 @@ func TestFireCatchups_noopWhenLatestIsCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	fired, _, err := fireCatchups(aosHome, store, agents, runs)
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	fired, _, err := fireCatchups(aosHome, store, agents, runs, now)
 	if err != nil {
 		t.Fatalf("fireCatchups: %v", err)
 	}
@@ -190,7 +194,7 @@ func TestFireCatchups_missingWrapperReportsError(t *testing.T) {
 	}
 	// No wrapper.sh on disk.
 
-	if _, _, err := fireCatchups(aosHome, NewFileRunStore(aosHome), nil, nil); err == nil {
+	if _, _, err := fireCatchups(aosHome, NewFileRunStore(aosHome), nil, nil, time.Now()); err == nil {
 		t.Error("fireCatchups returned nil error despite missing wrapper")
 	}
 }

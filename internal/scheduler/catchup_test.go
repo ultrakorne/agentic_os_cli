@@ -28,7 +28,7 @@ func TestDetectCatchups_firesWhenLatestIsMissed(t *testing.T) {
 		run("ping", StatusMissed, now.Add(-30*time.Minute)),
 	}
 
-	out := DetectCatchups([]Agent{a}, runs)
+	out := DetectCatchups([]Agent{a}, runs, now)
 	if len(out) != 1 {
 		t.Fatalf("expected 1 candidate, got %d (%+v)", len(out), out)
 	}
@@ -60,7 +60,7 @@ func TestDetectCatchups_skipsLatestNonMissed(t *testing.T) {
 				run("ping", StatusMissed, now.Add(-2*time.Hour)),
 				run("ping", tc.status, now.Add(-30*time.Minute)),
 			}
-			if got := DetectCatchups([]Agent{a}, runs); len(got) != 0 {
+			if got := DetectCatchups([]Agent{a}, runs, now); len(got) != 0 {
 				t.Errorf("expected 0 candidates, got %+v", got)
 			}
 		})
@@ -73,7 +73,7 @@ func TestDetectCatchups_skipsAgentWithNoRuns(t *testing.T) {
 	// only kicks in after a missed record exists.
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	a := hourlyAgent("ping", 0, now.Add(-48*time.Hour))
-	if got := DetectCatchups([]Agent{a}, nil); len(got) != 0 {
+	if got := DetectCatchups([]Agent{a}, nil, now); len(got) != 0 {
 		t.Errorf("expected 0 candidates, got %+v", got)
 	}
 }
@@ -84,7 +84,7 @@ func TestDetectCatchups_skipsUnscheduledAgent(t *testing.T) {
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	a := Agent{ID: "ping"} // no schedule
 	runs := []Run{run("ping", StatusMissed, now.Add(-30*time.Minute))}
-	if got := DetectCatchups([]Agent{a}, runs); len(got) != 0 {
+	if got := DetectCatchups([]Agent{a}, runs, now); len(got) != 0 {
 		t.Errorf("expected 0 candidates, got %+v", got)
 	}
 }
@@ -98,7 +98,7 @@ func TestDetectCatchups_idempotentOnceCatchupIsRunning(t *testing.T) {
 		run("ping", StatusMissed, now.Add(-30*time.Minute)),
 		run("ping", StatusRunning, now.Add(-1*time.Minute)),
 	}
-	if got := DetectCatchups([]Agent{a}, runs); len(got) != 0 {
+	if got := DetectCatchups([]Agent{a}, runs, now); len(got) != 0 {
 		t.Errorf("expected 0 candidates (catch-up already running), got %+v", got)
 	}
 }
@@ -112,8 +112,46 @@ func TestDetectCatchups_doesNotRetryFailedCatchup(t *testing.T) {
 		run("ping", StatusMissed, now.Add(-30*time.Minute)),
 		run("ping", StatusError, now.Add(-1*time.Minute)),
 	}
-	if got := DetectCatchups([]Agent{a}, runs); len(got) != 0 {
+	if got := DetectCatchups([]Agent{a}, runs, now); len(got) != 0 {
 		t.Errorf("expected 0 candidates (catch-up failed; do not retry), got %+v", got)
+	}
+}
+
+func TestDetectCatchups_quietWindowDefersFreshSlot(t *testing.T) {
+	// Race scenario: the laptop is alive at the scheduled minute, cron fires
+	// the wrapper at the slot start, but the */10 tick also fires in the same
+	// second and reads runs/ before wrapper.sh has written its "running"
+	// marker (wrapper's iso_now shells out to python3 — hundreds of ms). The
+	// tick sees the slot as missed and would otherwise race a duplicate
+	// catch-up. The quiet window defers that decision to the next tick, by
+	// which time the cron-spawned wrapper will have registered.
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	a := hourlyAgent("ping", 0, now.Add(-48*time.Hour))
+	freshMiss := run("ping", StatusMissed, now.Add(-1*time.Second))
+
+	if got := DetectCatchups([]Agent{a}, []Run{freshMiss}, now); len(got) != 0 {
+		t.Errorf("expected 0 candidates within quiet window, got %+v", got)
+	}
+
+	// Sanity check the boundary: a miss older than MinCatchupSlotAge still
+	// fires. The previous case must be exercising the window, not some other
+	// short-circuit.
+	oldMiss := run("ping", StatusMissed, now.Add(-MinCatchupSlotAge-time.Second))
+	if got := DetectCatchups([]Agent{a}, []Run{oldMiss}, now); len(got) != 1 {
+		t.Errorf("expected 1 candidate past quiet window, got %+v", got)
+	}
+}
+
+func TestDetectCatchups_zeroNowDisablesQuietWindow(t *testing.T) {
+	// Callers that don't care about wall-clock pacing (older test paths, ad
+	// hoc tooling) can pass time.Time{} to skip the quiet-window check and
+	// get the original "latest is missed → candidate" behavior.
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	a := hourlyAgent("ping", 0, now.Add(-48*time.Hour))
+	freshMiss := run("ping", StatusMissed, now.Add(-1*time.Second))
+
+	if got := DetectCatchups([]Agent{a}, []Run{freshMiss}, time.Time{}); len(got) != 1 {
+		t.Errorf("expected 1 candidate with zero now, got %+v", got)
 	}
 }
 
@@ -154,7 +192,7 @@ func TestDetectCatchups_sameSecondMixedTimestampFormat(t *testing.T) {
 		t.Fatalf("test premise broken: expected %q < %q lex", real.StartedAt, miss.StartedAt)
 	}
 
-	if got := DetectCatchups([]Agent{a}, []Run{miss, real}); len(got) != 0 {
+	if got := DetectCatchups([]Agent{a}, []Run{miss, real}, now); len(got) != 0 {
 		t.Errorf("expected 0 candidates (real wrapper later in real time despite lex inversion), got %+v", got)
 	}
 }
@@ -169,7 +207,7 @@ func TestDetectCatchups_multipleAgentsStableOrder(t *testing.T) {
 		run("apple", StatusMissed, now.Add(-31*time.Minute)),
 		run("mango", StatusSuccess, now.Add(-29*time.Minute)),
 	}
-	out := DetectCatchups([]Agent{zebra, apple, mango}, runs)
+	out := DetectCatchups([]Agent{zebra, apple, mango}, runs, now)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 candidates, got %d (%+v)", len(out), out)
 	}
