@@ -5,9 +5,7 @@ Also include a tui, just run `aos`
 
 <img width="780" height="426" alt="image" src="https://github.com/user-attachments/assets/8257f8b0-f98f-4a81-ad59-0f7a81827281" />
 
-
 <img width="1095" height="190" alt="image" src="https://github.com/user-attachments/assets/a45674e6-45de-4a0c-bfe1-4c8363422a24" />
-
 
 ## Install
 
@@ -20,6 +18,12 @@ curl -fsSL https://raw.githubusercontent.com/ultrakorne/agentic_os_cli/master/sc
 (For a system-wide path like `/usr/local/bin` replace after the pipe with `... | sudo -E env BIN_DIR=/usr/local/bin bash`.)
 
 After reinstalling to a different path, run `aos refresh` to rebuild the crontab line against the new binary location.
+
+To install the skill
+
+```sh
+gh skills install ultrakorne/agentic_os_cli
+```
 
 ### macOS
 
