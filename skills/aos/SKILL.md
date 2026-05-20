@@ -5,6 +5,7 @@ description: >
   local agent via the `aos` CLI — anything under `aos list/describe/schedule/
   run/runs/refresh`. Also use it when writing scripts that live under
   `<aos_home>/agents/`
+license: 'MIT'
 allowed-tools: Bash(aos:*), Bash(jq:*)
 ---
 
