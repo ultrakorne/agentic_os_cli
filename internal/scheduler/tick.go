@@ -85,7 +85,10 @@ func Tick(deps TickDeps) (TickOutcome, error) {
 	if beErr != nil {
 		out.Backend = "error(" + sanitizeForState(beErr.Error()) + ")"
 	} else {
-		spec := buildBackendSpec(cfg.AosHome, scan.Agents, interval)
+		spec, specWarn := buildBackendSpec(cfg.AosHome, scan.Agents, interval)
+		if specWarn != "" {
+			out.Warnings = append(out.Warnings, specWarn)
+		}
 		st, err := be.State(spec)
 		if err != nil {
 			out.Backend = "error(" + sanitizeForState(err.Error()) + ")"
@@ -100,9 +103,14 @@ func Tick(deps TickDeps) (TickOutcome, error) {
 	return out, nil
 }
 
-// buildBackendSpec assembles the backend.Spec the platform backends consume.
-// Used by both tick (for State drift checks) and refresh (for Sync).
-func buildBackendSpec(aosHome string, agents []Agent, interval time.Duration) backend.Spec {
+// buildBackendSpec assembles the backend.Spec the tick's State drift check
+// consumes. The second return value is a non-empty warning string when
+// runtime.AosBinaryPath fails — tick surfaces it so its State observation
+// stays consistent with refresh's (which records the same error explicitly).
+// Without that, tick's spec ends up with an empty AosBinaryPath, the backend
+// drops the tick job from `expected`, and State reports drift while refresh
+// reports skipped — same machine, different verbs, contradictory output.
+func buildBackendSpec(aosHome string, agents []Agent, interval time.Duration) (backend.Spec, string) {
 	jobs := make([]backend.AgentJob, 0)
 	for _, a := range agents {
 		if a.Meta.Schedule == nil {
@@ -117,7 +125,11 @@ func buildBackendSpec(aosHome string, agents []Agent, interval time.Duration) ba
 			Schedule:   *a.Meta.Schedule,
 		})
 	}
-	aosBin, _ := runtime.AosBinaryPath()
+	aosBin, err := runtime.AosBinaryPath()
+	warn := ""
+	if err != nil {
+		warn = fmt.Sprintf("resolve aos binary: %v", err)
+	}
 	return backend.Spec{
 		Agents: jobs,
 		Tick: backend.TickJob{
@@ -125,7 +137,7 @@ func buildBackendSpec(aosHome string, agents []Agent, interval time.Duration) ba
 			LogPath:       filepath.Join(aosHome, "tick.log"),
 			Interval:      interval,
 		},
-	}
+	}, warn
 }
 
 // sanitizeForState scrubs an error string so it can sit inside the

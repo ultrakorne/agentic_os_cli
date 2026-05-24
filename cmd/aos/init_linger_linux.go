@@ -44,12 +44,19 @@ func maybePromptLinger(refresh scheduler.RefreshOutcome) {
 	}
 
 	fmt.Fprintln(os.Stderr, styleWarn.Render("warn: linger is disabled. Without it, scheduled agents won't fire when you're not logged in (headless host)."))
-	fmt.Fprint(os.Stderr, "Enable linger so scheduled agents run when you're not logged in? Requires sudo. [Y/n] ")
+	fmt.Fprint(os.Stderr, "Enable linger so scheduled agents run when you're not logged in? Requires sudo. [y/N] ")
 
 	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
+	line, err := reader.ReadString('\n')
+	// Default-deny: only an explicit "y" or "yes" proceeds. EOF / closed
+	// stdin / ambiguous input all fall through to the warn-and-skip path
+	// rather than invoking `sudo` with no way to type a password.
+	if err != nil && line == "" {
+		fmt.Fprintln(os.Stderr, styleWarn.Render("warn: stdin closed before answer; linger left disabled."))
+		return
+	}
 	ans := strings.ToLower(strings.TrimSpace(line))
-	if ans == "n" || ans == "no" {
+	if ans != "y" && ans != "yes" {
 		fmt.Fprintln(os.Stderr, styleWarn.Render("warn: linger left disabled; agents may not fire while logged out."))
 		return
 	}
