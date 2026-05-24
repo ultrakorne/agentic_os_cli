@@ -5,34 +5,28 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/ultrakorne/aos_cli/internal/scheduler/schedspec"
 )
 
-type Weekday string
+// Type aliases re-export the leaf schedspec package so existing callers
+// (cmd/aos, tests) keep using `scheduler.ScheduleSpec` and `scheduler.Mon`.
+type Weekday = schedspec.Weekday
+type ScheduleSpec = schedspec.ScheduleSpec
 
 const (
-	Sun Weekday = "sun"
-	Mon Weekday = "mon"
-	Tue Weekday = "tue"
-	Wed Weekday = "wed"
-	Thu Weekday = "thu"
-	Fri Weekday = "fri"
-	Sat Weekday = "sat"
+	Sun = schedspec.Sun
+	Mon = schedspec.Mon
+	Tue = schedspec.Tue
+	Wed = schedspec.Wed
+	Thu = schedspec.Thu
+	Fri = schedspec.Fri
+	Sat = schedspec.Sat
 )
 
-var weekdayToCron = map[Weekday]int{
-	Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
-}
+var weekdayToCron = schedspec.WeekdayToCron
 
-// ScheduleSpec is a tagged union: kind=hourly|daily.
-type ScheduleSpec struct {
-	Kind       string    `json:"kind"`
-	EveryHours int       `json:"everyHours,omitempty"`
-	Days       []Weekday `json:"days,omitempty"`
-	Hour       int       `json:"hour,omitempty"`
-	Minute     int       `json:"minute"`
-}
-
-// AgentMeta mirrors the .meta.json sidecar shape (only fields we care about).
+// AgentMeta mirrors the .meta.json sidecar shape.
 type AgentMeta struct {
 	Schedule    *ScheduleSpec `json:"schedule,omitempty"`
 	ScheduledAt string        `json:"scheduledAt,omitempty"`

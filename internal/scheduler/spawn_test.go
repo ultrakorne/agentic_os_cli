@@ -23,18 +23,17 @@ func TestNewRunID_isUnique(t *testing.T) {
 
 // TestSpawnWrapperDetached_passesArgsAndTriggerEnv runs a fake wrapper that
 // records its argv and AGENTIC_OS_TRIGGER to a log file, then asserts both.
-// Locks in the wrapper argv contract: <aos_home> <schedule-id> <agent-id>
-// <script> <run-id>. Also pins the per-trigger env wiring callers depend on
-// (manual / catch-up records distinguishable from schedule runs).
+// Locks in the wrapper argv contract: <aos_home> <agent-id> <script>
+// <run-id>. Also pins the per-trigger env wiring callers depend on (manual
+// runs distinguishable from schedule runs).
 func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
 	cases := []struct {
-		name       string
-		scheduleID string
-		trigger    string
+		name    string
+		trigger string
 	}{
-		{"manual", "", "manual"},
-		{"catch-up", "2026-05-17T09:00:00Z", "catch-up"},
-		{"schedule default", "", ""},
+		{"manual", "manual"},
+		{"catch-up", "catch-up"},
+		{"schedule default", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -46,7 +45,6 @@ func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
 				"echo \"$2\" >> \"" + log + "\"\n" +
 				"echo \"$3\" >> \"" + log + "\"\n" +
 				"echo \"$4\" >> \"" + log + "\"\n" +
-				"echo \"$5\" >> \"" + log + "\"\n" +
 				"echo \"trigger=$AGENTIC_OS_TRIGGER\" >> \"" + log + "\"\n"
 			if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
 				t.Fatalf("write wrapper: %v", err)
@@ -66,7 +64,6 @@ func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
 
 			err := SpawnWrapperDetached(wrapper, SpawnOpts{
 				AosHome:    aosHome,
-				ScheduleID: tc.scheduleID,
 				AgentID:    "planner",
 				ScriptPath: script,
 				RunID:      "run-xyz",
@@ -87,20 +84,20 @@ func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
 						lines = append(lines, s.Text())
 					}
 					f.Close()
-					if len(lines) >= 6 {
+					if len(lines) >= 5 {
 						break
 					}
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
-			if len(lines) < 6 {
+			if len(lines) < 5 {
 				t.Fatalf("wrapper log incomplete after wait: %v", lines)
 			}
 			expectedTrigger := tc.trigger
 			if expectedTrigger == "" {
 				expectedTrigger = "schedule"
 			}
-			want := []string{aosHome, tc.scheduleID, "planner", script, "run-xyz", "trigger=" + expectedTrigger}
+			want := []string{aosHome, "planner", script, "run-xyz", "trigger=" + expectedTrigger}
 			for i, w := range want {
 				if lines[i] != w {
 					t.Errorf("line %d = %q, want %q", i, lines[i], w)

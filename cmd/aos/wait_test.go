@@ -30,7 +30,6 @@ func writeRun(t *testing.T, dir, id, status string, exitCode *int) {
 	body := `{
   "id": "` + id + `",
   "agentId": "planner",
-  "scheduleId": null,
   "trigger": "manual",
   "startedAt": "2026-05-16T13:09:37.072Z",
   "endedAt": "2026-05-16T13:09:39.103Z",

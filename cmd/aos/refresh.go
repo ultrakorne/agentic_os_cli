@@ -15,7 +15,7 @@ import (
 
 var refreshCmd = &cobra.Command{
 	Use:   "refresh",
-	Short: "Reconcile agent schedules and runtime into the user's crontab",
+	Short: "Reconcile agent schedules and runtime into the platform scheduler",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		out, err := runRefresh()
@@ -36,9 +36,6 @@ var refreshCmd = &cobra.Command{
 	},
 }
 
-// runRefresh loads config and delegates to scheduler.Refresh. The in-process
-// callers (init, schedule, the TUI popup) call this same helper so flag/env
-// resolution stays in one place.
 func runRefresh() (scheduler.RefreshOutcome, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -47,48 +44,66 @@ func runRefresh() (scheduler.RefreshOutcome, error) {
 	return scheduler.Refresh(scheduler.RefreshDeps{Cfg: cfg, Now: time.Now()})
 }
 
-// emitWarnings prints each non-fatal step error to stderr so operators see
-// them next to whatever else cron is logging. The structured outcome carries
-// them in JSON too — this is just the human channel.
 func emitWarnings(ws []string) {
 	for _, w := range ws {
 		fmt.Fprintf(os.Stderr, "warn: %s\n", w)
 	}
 }
 
-// printRefreshHuman renders the refresh outcome as a key/value block, color
-// coding the runtime-health fields so a degraded install (missing wrapper,
-// cron daemon down, etc.) stands out at a glance.
 func printRefreshHuman(s scheduler.RefreshOutcome) {
-	printKV([]kvRow{
+	rows := []kvRow{
 		{Key: "agents", Value: fmt.Sprintf("%d", s.Agents)},
 		{Key: "scheduled", Value: fmt.Sprintf("%d", s.Scheduled)},
 		{Key: "issues", Value: fmt.Sprintf("%d", s.Issues), Style: issueStyle(s.Issues)},
-		{Key: "cron", Value: cronDisplay(s.Cron), Style: cronStyle(s.Cron)},
+		{Key: "backend", Value: backendDisplay(s.Backend), Style: backendStyle(s.Backend)},
 		{Key: "wrapper", Value: string(s.Wrapper), Style: healthStyle(string(s.Wrapper))},
 		{Key: "python3", Value: string(s.Python3), Style: healthStyle(string(s.Python3))},
-		{Key: "daemon", Value: string(s.Daemon), Style: healthStyle(string(s.Daemon))},
-		{Key: "log", Value: logDisplay(s.Log), Style: logStyle(s.Log)},
-		{Key: "runs", Value: runsDisplay(s.Runs), Style: runsStyle(s.Runs)},
-	})
-}
-
-func cronDisplay(c scheduler.CronSyncOutcome) string {
-	if len(c.Reasons) == 0 {
-		return string(c.State)
+		{Key: "backendHealth", Value: string(s.BackendHealth), Style: healthStyle(string(s.BackendHealth))},
 	}
-	return string(c.State) + ":" + strings.Join(c.Reasons, ",")
+	if s.LingerState != "" {
+		rows = append(rows, kvRow{Key: "linger", Value: string(s.LingerState), Style: healthStyle(string(s.LingerState))})
+	}
+	rows = append(rows,
+		kvRow{Key: "log", Value: logDisplay(s.Log), Style: logStyle(s.Log)},
+		kvRow{Key: "runs", Value: runsDisplay(s.Runs), Style: runsStyle(s.Runs)},
+	)
+	printKV(rows)
 }
 
-func cronStyle(c scheduler.CronSyncOutcome) *lipgloss.Style {
-	switch c.State {
-	case scheduler.CronWrote, scheduler.CronUnchanged:
+func backendDisplay(b scheduler.BackendSyncOutcome) string {
+	parts := []string{b.State}
+	if len(b.Reasons) > 0 {
+		parts = append(parts, strings.Join(b.Reasons, ","))
+	}
+	counts := []string{}
+	if b.Wrote > 0 {
+		counts = append(counts, fmt.Sprintf("wrote=%d", b.Wrote))
+	}
+	if b.Removed > 0 {
+		counts = append(counts, fmt.Sprintf("removed=%d", b.Removed))
+	}
+	if b.Unchanged > 0 {
+		counts = append(counts, fmt.Sprintf("unchanged=%d", b.Unchanged))
+	}
+	if len(counts) > 0 {
+		parts = append(parts, "("+strings.Join(counts, " ")+")")
+	}
+	return strings.Join(parts, ":")
+}
+
+func backendStyle(b scheduler.BackendSyncOutcome) *lipgloss.Style {
+	switch b.State {
+	case "managed", "empty":
 		st := lipgloss.NewStyle().Foreground(colorSuccess)
 		return &st
-	case scheduler.CronSkipped:
+	case "drift":
 		st := styleWarn
 		return &st
-	case scheduler.CronConflict:
+	case "skipped":
+		st := styleWarn
+		return &st
+	}
+	if len(b.Failed) > 0 {
 		st := styleErr
 		return &st
 	}
@@ -134,6 +149,9 @@ func healthStyle(v string) *lipgloss.Style {
 		return &st
 	case "missing", "down":
 		st := styleErr
+		return &st
+	case "disabled":
+		st := styleWarn
 		return &st
 	case "unknown":
 		st := styleWarn

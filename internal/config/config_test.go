@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // withFakeHome redirects $HOME to a fresh temp dir for the duration of the
@@ -78,6 +79,32 @@ func TestLoadInvalidTOMLErrors(t *testing.T) {
 	}
 }
 
+func TestLoadIgnoresRemovedCatchupField(t *testing.T) {
+	// Upgrade path: an old config.toml with `catchup_enabled = false` must
+	// still parse cleanly under the new schema. go-toml ignores unknown
+	// fields by default; this test pins that behavior so the dead field name
+	// never sneaks back in as a parse error.
+	withFakeHome(t)
+	p, err := Path()
+	if err != nil {
+		t.Fatalf("Path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := "aos_home = \"/tmp/x\"\ncatchup_enabled = false\nruns_hard_cap = 100\n"
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got == nil || got.AosHome != "/tmp/x" || got.RunsHardCap != 100 {
+		t.Errorf("Load = %+v, want clean parse with legacy field ignored", got)
+	}
+}
+
 func TestRemoveExistingClearsConfigAndDir(t *testing.T) {
 	withFakeHome(t)
 	if err := Save(&Config{AosHome: "/tmp/x"}); err != nil {
@@ -130,40 +157,32 @@ func TestEffectiveRunsHardCapDefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestEffectiveTickCronExprValidInputs(t *testing.T) {
+func TestEffectiveTickIntervalValidInputs(t *testing.T) {
 	cases := []struct {
 		name string
 		cfg  *Config
-		want string
+		want time.Duration
 	}{
-		{"nil config falls back to default", nil, "*/10 * * * *"},
-		{"empty string falls back to default", &Config{}, "*/10 * * * *"},
-		{"minute interval", &Config{TickInterval: "5m"}, "*/5 * * * *"},
-		{"lower minute bound", &Config{TickInterval: "1m"}, "*/1 * * * *"},
-		{"upper minute bound", &Config{TickInterval: "59m"}, "*/59 * * * *"},
-		{"60m promotes to hour", &Config{TickInterval: "60m"}, "0 */1 * * *"},
-		{"1h", &Config{TickInterval: "1h"}, "0 */1 * * *"},
-		{"2h", &Config{TickInterval: "2h"}, "0 */2 * * *"},
-		{"6h", &Config{TickInterval: "6h"}, "0 */6 * * *"},
-		{"23h upper bound", &Config{TickInterval: "23h"}, "0 */23 * * *"},
+		{"nil config falls back to default", nil, time.Hour},
+		{"empty string falls back to default", &Config{}, time.Hour},
+		{"5 minutes", &Config{TickInterval: "5m"}, 5 * time.Minute},
+		{"1 hour explicit", &Config{TickInterval: "1h"}, time.Hour},
+		{"6 hours", &Config{TickInterval: "6h"}, 6 * time.Hour},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := tc.cfg.EffectiveTickCronExpr()
+			got, err := tc.cfg.EffectiveTickInterval()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got != tc.want {
-				t.Errorf("EffectiveTickCronExpr = %q, want %q", got, tc.want)
+				t.Errorf("EffectiveTickInterval = %v, want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestEffectiveTickCronExprRejectsBadValues(t *testing.T) {
-	// Bad inputs must return both an error AND the default cron expression
-	// so refresh/tick can log the warning and still install a working cron
-	// block.
+func TestEffectiveTickIntervalRejectsBadValues(t *testing.T) {
 	cases := []struct {
 		name string
 		raw  string
@@ -171,20 +190,15 @@ func TestEffectiveTickCronExprRejectsBadValues(t *testing.T) {
 		{"garbage", "not-a-duration"},
 		{"sub-minute", "30s"},
 		{"zero", "0m"},
-		{"fractional minutes", "1.5m"},
-		{"90m not whole hours", "90m"},
-		{"24h too large", "24h"},
-		{"100h too large", "100h"},
-		{"negative", "-5m"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := (&Config{TickInterval: tc.raw}).EffectiveTickCronExpr()
+			got, err := (&Config{TickInterval: tc.raw}).EffectiveTickInterval()
 			if err == nil {
 				t.Fatalf("expected error for %q, got nil", tc.raw)
 			}
-			if got != "*/10 * * * *" {
-				t.Errorf("fallback expr = %q, want default %q", got, "*/10 * * * *")
+			if got != time.Hour {
+				t.Errorf("fallback = %v, want default 1h", got)
 			}
 		})
 	}
@@ -202,43 +216,6 @@ func TestSaveLoadPreservesTickInterval(t *testing.T) {
 	}
 	if got == nil || got.TickInterval != "15m" {
 		t.Errorf("Load = %+v, want TickInterval=\"15m\"", got)
-	}
-}
-
-func TestEffectiveCatchupEnabledDefaultsToTrue(t *testing.T) {
-	tru, fls := true, false
-	cases := []struct {
-		name string
-		cfg  *Config
-		want bool
-	}{
-		{"nil config", nil, true},
-		{"zero value", &Config{}, true},
-		{"explicit true", &Config{CatchupEnabled: &tru}, true},
-		{"explicit false", &Config{CatchupEnabled: &fls}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.cfg.EffectiveCatchupEnabled(); got != tc.want {
-				t.Errorf("EffectiveCatchupEnabled = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestSaveLoadPreservesCatchupEnabledFalse(t *testing.T) {
-	withFakeHome(t)
-	fls := false
-	want := &Config{AosHome: "/tmp/x", CatchupEnabled: &fls}
-	if err := Save(want); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
-	got, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got == nil || got.CatchupEnabled == nil || *got.CatchupEnabled != false {
-		t.Errorf("Load = %+v, want CatchupEnabled=false", got)
 	}
 }
 

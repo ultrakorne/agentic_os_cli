@@ -8,7 +8,7 @@ import (
 
 // SpawnOpts configures one wrapper invocation. The wrapper's argv contract is
 //
-//	wrapper.sh <aos-home> <schedule-id|''> <agent-id> <script-path> <run-id>
+//	wrapper.sh <aos-home> <agent-id> <script-path> <run-id>
 //
 // Trigger is conveyed via the AGENTIC_OS_TRIGGER env var (defaults to
 // "schedule" inside the wrapper if unset). Callers pass an explicit RunID so
@@ -16,7 +16,6 @@ import (
 // wrapper writes on disk.
 type SpawnOpts struct {
 	AosHome    string
-	ScheduleID string
 	AgentID    string
 	ScriptPath string
 	RunID      string
@@ -27,7 +26,7 @@ type SpawnOpts struct {
 // caller exiting. stdout/stderr/stdin default to /dev/null in os/exec when
 // left nil, decoupling the wrapper from whatever shell aos was launched in.
 func SpawnWrapperDetached(wrapperPath string, opts SpawnOpts) error {
-	cmd := exec.Command(wrapperPath, opts.AosHome, opts.ScheduleID, opts.AgentID, opts.ScriptPath, opts.RunID)
+	cmd := exec.Command(wrapperPath, opts.AosHome, opts.AgentID, opts.ScriptPath, opts.RunID)
 	trigger := opts.Trigger
 	if trigger == "" {
 		trigger = "schedule"
@@ -39,4 +38,3 @@ func SpawnWrapperDetached(wrapperPath string, opts SpawnOpts) error {
 	}
 	return cmd.Process.Release()
 }
-

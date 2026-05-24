@@ -11,13 +11,12 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ultrakorne/aos_cli/internal/config"
-	"github.com/ultrakorne/aos_cli/internal/crontab"
-	"github.com/ultrakorne/aos_cli/internal/runtime"
+	"github.com/ultrakorne/aos_cli/internal/scheduler/backend"
 )
 
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
-	Short: "Remove the aos config, wrapper.sh, and managed cron section",
+	Short: "Remove the aos config, wrapper.sh, tick log, and platform scheduler entries",
 	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		s := runUninstall()
@@ -34,10 +33,10 @@ var uninstallCmd = &cobra.Command{
 }
 
 type uninstallSummary struct {
-	Wrapper string   `json:"wrapper"` // removed | absent
-	Cron    string   `json:"cron"`    // removed | unchanged | skipped:<reason>
-	Config  string   `json:"config"`  // removed | absent
-	Kept    []string `json:"kept"`
+	Wrapper string `json:"wrapper"` // removed | absent
+	TickLog string `json:"tickLog"` // removed | absent
+	Backend string `json:"backend"` // removed | skipped:<reason>
+	Config  string `json:"config"`  // removed | absent
 }
 
 func printUninstallHuman(s uninstallSummary) {
@@ -55,26 +54,18 @@ func printUninstallHuman(s uninstallSummary) {
 	}
 	rows := []kvRow{
 		{Key: "wrapper", Value: s.Wrapper, Style: stateStyle(s.Wrapper)},
-		{Key: "cron", Value: s.Cron, Style: stateStyle(s.Cron)},
+		{Key: "tickLog", Value: s.TickLog, Style: stateStyle(s.TickLog)},
+		{Key: "backend", Value: s.Backend, Style: stateStyle(s.Backend)},
 		{Key: "config", Value: s.Config, Style: stateStyle(s.Config)},
-	}
-	keptVal := "(none)"
-	if len(s.Kept) > 0 {
-		keptVal = strings.Join(s.Kept, ", ")
-		warnS := styleWarn
-		rows = append(rows, kvRow{Key: "kept", Value: keptVal, Style: &warnS})
-	} else {
-		rows = append(rows, kvRow{Key: "kept", Value: keptVal})
 	}
 	printKV(rows)
 }
 
 func runUninstall() uninstallSummary {
-	s := uninstallSummary{Wrapper: "absent", Cron: "unchanged", Config: "absent"}
+	s := uninstallSummary{Wrapper: "absent", TickLog: "absent", Backend: "unchanged", Config: "absent"}
 
 	cfg, err := config.Load()
 	if err != nil {
-		// surface but continue — we still want to try removing the crontab block.
 		fmt.Fprintf(os.Stderr, "warn: read config: %v\n", err)
 	}
 
@@ -85,31 +76,24 @@ func runUninstall() uninstallSummary {
 		} else if !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "warn: remove %s: %v\n", wrapperPath, err)
 		}
-
-		// Try empty-only removal of agents/, runs/, and aos_home itself.
-		for _, sub := range []string{"agents", "runs"} {
-			p := filepath.Join(cfg.AosHome, sub)
-			if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-				s.Kept = append(s.Kept, p)
-			}
-		}
-		if err := os.Remove(cfg.AosHome); err != nil && !errors.Is(err, os.ErrNotExist) {
-			s.Kept = append(s.Kept, cfg.AosHome)
+		tickLog := filepath.Join(cfg.AosHome, "tick.log")
+		if err := os.Remove(tickLog); err == nil {
+			s.TickLog = "removed"
+		} else if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "warn: remove %s: %v\n", tickLog, err)
 		}
 	}
 
-	if runtime.HasBin("crontab") {
-		result, err := crontab.RemoveManaged()
-		switch {
-		case err != nil:
-			s.Cron = "skipped:" + sanitize(err.Error())
-		case result.Wrote:
-			s.Cron = "removed"
-		default:
-			s.Cron = "unchanged"
+	if cfg != nil && cfg.AosHome != "" {
+		if be, err := backend.Select(cfg.AosHome); err != nil {
+			s.Backend = "skipped:" + sanitize(err.Error())
+		} else if err := be.Remove(); err != nil {
+			s.Backend = "skipped:" + sanitize(err.Error())
+		} else {
+			s.Backend = "removed"
 		}
 	} else {
-		s.Cron = "skipped:no-crontab-bin"
+		s.Backend = "skipped:no-config"
 	}
 
 	configRemoved, _, err := config.Remove()

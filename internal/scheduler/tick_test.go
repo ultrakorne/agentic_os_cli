@@ -1,31 +1,12 @@
 package scheduler
 
 import (
-	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
-
-// installFakeWrapper drops a tiny bash wrapper at <aosHome>/wrapper.sh that
-// logs its argv + AGENTIC_OS_TRIGGER to <aosHome>/wrapper.log. Returns the
-// log path so tests can poll it.
-func installFakeWrapper(t *testing.T, aosHome string) string {
-	t.Helper()
-	if err := os.MkdirAll(aosHome, 0o755); err != nil {
-		t.Fatalf("mkdir home: %v", err)
-	}
-	wrapper := filepath.Join(aosHome, "wrapper.sh")
-	log := filepath.Join(aosHome, "wrapper.log")
-	body := "#!/usr/bin/env bash\n" +
-		"echo \"$1|$2|$3|$4|$5|trigger=$AGENTIC_OS_TRIGGER\" >> \"" + log + "\"\n"
-	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
-		t.Fatalf("write wrapper: %v", err)
-	}
-	return log
-}
 
 func writeRunFile(t *testing.T, runsDir string, run Run) {
 	t.Helper()
@@ -41,160 +22,97 @@ func writeRunFile(t *testing.T, runsDir string, run Run) {
 	}
 }
 
-func waitForLines(t *testing.T, path string, want int, timeout time.Duration) []string {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var lines []string
-	for time.Now().Before(deadline) {
-		f, err := os.Open(path)
-		if err == nil {
-			s := bufio.NewScanner(f)
-			lines = lines[:0]
-			for s.Scan() {
-				lines = append(lines, s.Text())
-			}
-			f.Close()
-			if len(lines) >= want {
-				return lines
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	return lines
-}
-
-// TestFireCatchups_spawnsForMissedLatest covers the integration: a real
-// agent script + wrapper on disk + a Run{status:"missed"} record → one
-// catch-up wrapper invocation with the missed slot as scheduleId.
-func TestFireCatchups_spawnsForMissedLatest(t *testing.T) {
+// TestSweepStaleRunning_rewritesPastThreshold covers the new tick behavior
+// that replaced the catch-up dispatcher: a `running` record older than
+// StaleRunningThreshold gets rewritten as error so the dashboard stops
+// showing a phantom in-flight wrapper.
+func TestSweepStaleRunning_rewritesPastThreshold(t *testing.T) {
 	tmp := t.TempDir()
 	aosHome := filepath.Join(tmp, "home")
-	log := installFakeWrapper(t, aosHome)
-
-	scriptPath := filepath.Join(aosHome, "agents", "ping.sh")
-	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
-		t.Fatalf("mkdir agents: %v", err)
+	if err := os.MkdirAll(filepath.Join(aosHome, "runs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
-
-	missedSlot := "2026-05-17T11:00:00Z"
-	writeRunFile(t, filepath.Join(aosHome, "runs"), Run{
-		ID:        "miss-ping-2026-05-17T11-00-00Z",
-		AgentID:   "ping",
-		StartedAt: missedSlot,
-		Status:    StatusMissed,
-		Trigger:   "schedule",
-	})
-
-	agents := []Agent{{
-		ID:         "ping",
-		ScriptPath: scriptPath,
-		Meta: AgentMeta{
-			Schedule: &ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 0},
-		},
-	}}
-
 	store := NewFileRunStore(aosHome)
-	runs, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	startedAt := time.Date(2026, 5, 17, 10, 0, 0, 0, time.UTC)
+	r := Run{
+		ID:            "stale-run",
+		AgentID:       "ping",
+		StartedAt:     FormatRunTimestamp(startedAt),
+		StartedAtTime: startedAt,
+		Status:        StatusRunning,
+		Trigger:       "schedule",
 	}
-	// missedSlot is 11:00:00Z; pick a `now` well past MinCatchupSlotAge so
-	// the quiet window doesn't gate this integration case.
-	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-	fired, warns, err := fireCatchups(aosHome, store, agents, runs, now)
-	if err != nil {
-		t.Fatalf("fireCatchups: %v", err)
-	}
-	if len(warns) != 0 {
-		t.Errorf("unexpected warnings: %v", warns)
-	}
-	if fired != 1 {
-		t.Fatalf("fired = %d, want 1", fired)
-	}
+	writeRunFile(t, store.Dir(), r)
 
-	lines := waitForLines(t, log, 1, 2*time.Second)
-	if len(lines) != 1 {
-		t.Fatalf("wrapper log lines = %d, want 1: %v", len(lines), lines)
+	now := startedAt.Add(2 * time.Hour)
+	runs, _ := store.Load()
+	n, err := SweepStaleRunning(store, runs, now, StaleRunningThreshold)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
 	}
-	// argv contract: <aos-home>|<sched-id>|<agent-id>|<script>|<run-id>|trigger=catch-up
-	want := aosHome + "|" + missedSlot + "|ping|" + scriptPath + "|"
-	if got := lines[0]; len(got) < len(want) || got[:len(want)] != want {
-		t.Errorf("wrapper invocation = %q, want prefix %q", got, want)
+	if n != 1 {
+		t.Fatalf("expected 1 sweep, got %d", n)
 	}
-	if got := lines[0]; got[len(got)-len("|trigger=catch-up"):] != "|trigger=catch-up" {
-		t.Errorf("wrapper trigger env = %q, want suffix |trigger=catch-up", got)
+	got, err := store.Get("stale-run")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != StatusError {
+		t.Errorf("status = %s, want error", got.Status)
+	}
+	if got.Error == nil || *got.Error != "no completion record" {
+		t.Errorf("error = %v, want %q", got.Error, "no completion record")
+	}
+	if got.EndedAt == nil {
+		t.Errorf("endedAt not set")
 	}
 }
 
-func TestFireCatchups_noopWhenLatestIsCompleted(t *testing.T) {
+func TestSweepStaleRunning_skipsUnderThreshold(t *testing.T) {
 	tmp := t.TempDir()
 	aosHome := filepath.Join(tmp, "home")
-	log := installFakeWrapper(t, aosHome)
-
-	scriptPath := filepath.Join(aosHome, "agents", "ping.sh")
-	if err := os.MkdirAll(filepath.Dir(scriptPath), 0o755); err != nil {
-		t.Fatalf("mkdir agents: %v", err)
+	if err := os.MkdirAll(filepath.Join(aosHome, "runs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
-
-	runsDir := filepath.Join(aosHome, "runs")
-	writeRunFile(t, runsDir, Run{
-		ID:        "miss-ping",
-		AgentID:   "ping",
-		StartedAt: "2026-05-17T11:00:00Z",
-		Status:    StatusMissed,
-		Trigger:   "schedule",
-	})
-	writeRunFile(t, runsDir, Run{
-		ID:        "later-success",
-		AgentID:   "ping",
-		StartedAt: "2026-05-17T11:30:00Z",
-		Status:    StatusSuccess,
-		Trigger:   "schedule",
-	})
-
-	agents := []Agent{{
-		ID:         "ping",
-		ScriptPath: scriptPath,
-		Meta: AgentMeta{
-			Schedule: &ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 0},
-		},
-	}}
-
 	store := NewFileRunStore(aosHome)
-	runs, err := store.Load()
+	startedAt := time.Now().Add(-10 * time.Minute)
+	writeRunFile(t, store.Dir(), Run{
+		ID: "fresh-run", AgentID: "ping",
+		StartedAt: FormatRunTimestamp(startedAt), StartedAtTime: startedAt,
+		Status: StatusRunning,
+	})
+	runs, _ := store.Load()
+	n, err := SweepStaleRunning(store, runs, time.Now(), StaleRunningThreshold)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("Sweep: %v", err)
 	}
-	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
-	fired, _, err := fireCatchups(aosHome, store, agents, runs, now)
-	if err != nil {
-		t.Fatalf("fireCatchups: %v", err)
-	}
-	if fired != 0 {
-		t.Fatalf("fired = %d, want 0", fired)
-	}
-	// Sleep briefly so a wrongly-spawned wrapper would have time to write.
-	time.Sleep(150 * time.Millisecond)
-	if _, err := os.Stat(log); !os.IsNotExist(err) {
-		t.Errorf("wrapper.log should not exist (no spawn), stat err = %v", err)
+	if n != 0 {
+		t.Fatalf("expected 0 sweeps for fresh run, got %d", n)
 	}
 }
 
-func TestFireCatchups_missingWrapperReportsError(t *testing.T) {
+func TestSweepStaleRunning_skipsTerminal(t *testing.T) {
 	tmp := t.TempDir()
 	aosHome := filepath.Join(tmp, "home")
-	if err := os.MkdirAll(aosHome, 0o755); err != nil {
-		t.Fatalf("mkdir home: %v", err)
+	if err := os.MkdirAll(filepath.Join(aosHome, "runs"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
-	// No wrapper.sh on disk.
-
-	if _, _, err := fireCatchups(aosHome, NewFileRunStore(aosHome), nil, nil, time.Now()); err == nil {
-		t.Error("fireCatchups returned nil error despite missing wrapper")
+	store := NewFileRunStore(aosHome)
+	startedAt := time.Now().Add(-3 * time.Hour)
+	for _, status := range []RunStatus{StatusSuccess, StatusError, StatusMissed} {
+		writeRunFile(t, store.Dir(), Run{
+			ID:        "done-" + string(status),
+			AgentID:   "ping",
+			StartedAt: FormatRunTimestamp(startedAt), StartedAtTime: startedAt,
+			Status: status,
+		})
+	}
+	runs, _ := store.Load()
+	n, err := SweepStaleRunning(store, runs, time.Now(), StaleRunningThreshold)
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 sweeps for terminal records, got %d", n)
 	}
 }

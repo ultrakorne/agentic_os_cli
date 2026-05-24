@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # agentic_os run wrapper
-# usage: wrapper.sh <data-dir> <schedule-id|''> <agent-id> <agent-script>
+# usage: wrapper.sh <data-dir> <agent-id> <agent-script> [<run-id>]
 #
 # captures start/end/exit/output of <agent-script> and writes:
 #   <data-dir>/runs/<run-id>.json   meta record
@@ -17,18 +17,17 @@
 
 set -uo pipefail
 
-if [ $# -lt 4 ]; then
-  echo "wrapper.sh: expected 4 args, got $#" >&2
+if [ $# -lt 3 ]; then
+  echo "wrapper.sh: expected 3 args, got $#" >&2
   exit 64
 fi
 
 DATA_DIR="$1"
-SCHED_ID="$2"
-AGENT_ID="$3"
-SCRIPT="$4"
-# optional 5th arg: caller-provided run id (manual runs from the engine pass
+AGENT_ID="$2"
+SCRIPT="$3"
+# optional 4th arg: caller-provided run id (manual runs from the engine pass
 # this so the spawn-time stub matches the on-disk record).
-EXPLICIT_RUN_ID="${5:-}"
+EXPLICIT_RUN_ID="${4:-}"
 TRIGGER="${AGENTIC_OS_TRIGGER:-schedule}"
 
 # cron's PATH is minimal; cover the common per-user bin dirs so installed
@@ -69,22 +68,22 @@ iso_now() {
 }
 
 write_meta() {
-  # args: status ended exitCode
-  local status="$1" ended="$2" exit_code="$3"
-  python3 - "$META.tmp" "$RUN_ID" "$AGENT_ID" "$SCHED_ID" "$START" "$TRIGGER" "$status" "$ended" "$exit_code" "$RUN_ID.out" <<'PY'
+  # args: status ended exitCode [error]
+  local status="$1" ended="$2" exit_code="$3" err_msg="${4:-}"
+  python3 - "$META.tmp" "$RUN_ID" "$AGENT_ID" "$START" "$TRIGGER" "$status" "$ended" "$exit_code" "$RUN_ID.out" "$err_msg" <<'PY'
 import json, sys
-p, rid, jid, sid, start, trig, status, ended, ec, out_name = sys.argv[1:]
+p, rid, jid, start, trig, status, ended, ec, out_name = sys.argv[1:10]
+err = sys.argv[10] if len(sys.argv) > 10 and sys.argv[10] else None
 data = {
   "id": rid,
   "agentId": jid,
-  "scheduleId": sid or None,
   "trigger": trig,
   "startedAt": start,
   "endedAt": ended or None,
   "status": status,
   "exitCode": int(ec) if ec else None,
   "output": "",
-  "error": None,
+  "error": err,
   "outputPath": out_name,
 }
 with open(p, "w") as f:
@@ -95,6 +94,10 @@ PY
 
 START="$(iso_now)"
 write_meta running "" ""
+
+# SIGTERM/SIGINT: launchd/systemd send SIGTERM on reload; capture so the run
+# record reflects the interruption rather than orphaning a "running" entry.
+trap 'END="$(iso_now)"; write_meta error "$END" 143 "interrupted by reload"; exit 143' SIGTERM SIGINT
 
 # On macOS, scripts that arrived via download/scp/airdrop carry a
 # `com.apple.quarantine` xattr and Gatekeeper blocks the interpreter with

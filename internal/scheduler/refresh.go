@@ -7,36 +7,32 @@ import (
 	"time"
 
 	"github.com/ultrakorne/aos_cli/internal/config"
-	"github.com/ultrakorne/aos_cli/internal/crontab"
 	"github.com/ultrakorne/aos_cli/internal/logtrim"
 	"github.com/ultrakorne/aos_cli/internal/runtime"
+	"github.com/ultrakorne/aos_cli/internal/scheduler/backend"
 )
 
 // HealthState is the per-probe enum on the refresh outcome.
 type HealthState string
 
 const (
-	HealthOK      HealthState = "ok"
-	HealthMissing HealthState = "missing"
-	HealthDown    HealthState = "down"
-	HealthUnknown HealthState = "unknown"
+	HealthOK       HealthState = "ok"
+	HealthMissing  HealthState = "missing"
+	HealthDown     HealthState = "down"
+	HealthUnknown  HealthState = "unknown"
+	HealthDisabled HealthState = "disabled"
 )
 
-// CronSyncState is the structured outcome of the managed crontab block write.
-// Replaces the old colon-encoded string ("skipped:no-crontab-bin"); consumers
-// branch on State and read Reasons for the cause(s).
-type CronSyncState string
-
-const (
-	CronUnchanged CronSyncState = "unchanged"
-	CronWrote     CronSyncState = "wrote"
-	CronSkipped   CronSyncState = "skipped"
-	CronConflict  CronSyncState = "conflict"
-)
-
-type CronSyncOutcome struct {
-	State   CronSyncState `json:"state"`
-	Reasons []string      `json:"reasons,omitempty"`
+// BackendSyncOutcome is the structured reconciliation summary from the
+// platform-native backend (launchd on macOS, systemd-user on Linux). Replaces
+// the cron-era CronSyncOutcome.
+type BackendSyncOutcome struct {
+	State     string   `json:"state"`
+	Reasons   []string `json:"reasons,omitempty"`
+	Wrote     int      `json:"wrote"`
+	Unchanged int      `json:"unchanged"`
+	Removed   int      `json:"removed"`
+	Failed    []string `json:"failed,omitempty"`
 }
 
 // LogTrimOutcome reports whether tick.log was rotated this refresh.
@@ -44,48 +40,42 @@ type LogTrimOutcome struct {
 	Trimmed bool `json:"trimmed"`
 }
 
-// RunsSweepOutcome is the structured Sweep result. Deleted counts run-id pairs
-// pruned; Skipped is non-empty only when the sweep itself errored out (the
-// algorithm proceeds regardless).
+// RunsSweepOutcome is the structured Sweep result.
 type RunsSweepOutcome struct {
 	Deleted int    `json:"deleted"`
 	Skipped string `json:"skipped,omitempty"`
 }
 
-// RefreshOutcome is the structured result of one Refresh call. It is the JSON
-// wire format the CLI emits under `aos refresh --json` and the shape Electron
-// consumes.
+// RefreshOutcome is the structured result of one Refresh call. The JSON
+// shape is the contract Electron / scripts consume.
 type RefreshOutcome struct {
-	Agents    int              `json:"agents"`
-	Scheduled int              `json:"scheduled"`
-	Issues    int              `json:"issues"`
-	Cron      CronSyncOutcome  `json:"cron"`
-	Wrapper   HealthState      `json:"wrapper"`
-	Python3   HealthState      `json:"python3"`
-	Daemon    HealthState      `json:"daemon"`
-	Log       LogTrimOutcome   `json:"log"`
-	Runs      RunsSweepOutcome `json:"runs"`
-	Warnings  []string         `json:"warnings,omitempty"`
+	Agents        int                `json:"agents"`
+	Scheduled     int                `json:"scheduled"`
+	Issues        int                `json:"issues"`
+	Backend       BackendSyncOutcome `json:"backend"`
+	Wrapper       HealthState        `json:"wrapper"`
+	Python3       HealthState        `json:"python3"`
+	BackendHealth HealthState        `json:"backendHealth"`
+	LingerState   HealthState        `json:"lingerState,omitempty"`
+	Log           LogTrimOutcome     `json:"log"`
+	Runs          RunsSweepOutcome   `json:"runs"`
+	Warnings      []string           `json:"warnings,omitempty"`
 }
 
-// RefreshDeps gathers the inputs a Refresh needs from the verb. Now is taken
-// explicitly so callers can pin it in tests; the rest of the runtime probes
-// are called directly inside Refresh.
+// RefreshDeps gathers the inputs a Refresh needs from the verb.
 type RefreshDeps struct {
 	Cfg *config.Config
 	Now time.Time
 }
 
-// Refresh executes the scan → record-misses → compile-cron → sync-crontab →
-// trim-log → sweep-runs pipeline. Non-fatal step errors land on
-// RefreshOutcome.Warnings; only an unrecoverable failure (no config, missing
-// aos_home, scan error) returns an error.
+// Refresh executes the scan → record-misses → backend-sync → trim-log →
+// sweep-runs pipeline.
 func Refresh(deps RefreshDeps) (RefreshOutcome, error) {
 	out := RefreshOutcome{
-		Cron:    CronSyncOutcome{State: CronSkipped, Reasons: []string{"unknown"}},
-		Wrapper: HealthMissing,
-		Python3: HealthMissing,
-		Daemon:  HealthUnknown,
+		Backend:       BackendSyncOutcome{State: "skipped", Reasons: []string{"unknown"}},
+		Wrapper:       HealthMissing,
+		Python3:       HealthMissing,
+		BackendHealth: HealthUnknown,
 	}
 
 	cfg := deps.Cfg
@@ -103,14 +93,6 @@ func Refresh(deps RefreshDeps) (RefreshOutcome, error) {
 	if runtime.HasBin("python3") {
 		out.Python3 = HealthOK
 	}
-	hasCrontab := runtime.HasBin("crontab")
-	if running, err := runtime.CronDaemonRunning(); err == nil {
-		if running {
-			out.Daemon = HealthOK
-		} else {
-			out.Daemon = HealthDown
-		}
-	}
 
 	scan, err := ScanAgents(filepath.Join(cfg.AosHome, "agents"))
 	if err != nil {
@@ -119,83 +101,84 @@ func Refresh(deps RefreshDeps) (RefreshOutcome, error) {
 	out.Agents = len(scan.Agents)
 	out.Issues = len(scan.Issues)
 
-	// Record any newly-detected missed slots as runs/miss-*.json so the
-	// dashboard sees them in the run history. Failure is non-fatal — the
-	// cron block is still the more important thing to reconcile.
 	if _, _, err := RecordMissedRuns(cfg.AosHome, scan.Agents, deps.Now); err != nil {
 		out.Warnings = append(out.Warnings, err.Error())
 	}
 
-	entries := make([]crontab.Entry, 0)
+	agentJobs := make([]backend.AgentJob, 0)
 	for _, a := range scan.Agents {
 		if a.Meta.Schedule == nil {
 			continue
 		}
 		if len(a.Warnings) > 0 {
-			// A warned agent (e.g. not-executable) shouldn't enter the
-			// managed crontab block — cron would fire a script that can't
-			// run. Surface the count so a human reading the summary can see
-			// why a scheduled agent isn't showing up under cron.
 			out.Issues++
 			continue
 		}
-		expr, err := CompileToCron(*a.Meta.Schedule)
-		if err != nil {
-			out.Issues++
-			continue
-		}
-		entries = append(entries, crontab.Entry{
+		agentJobs = append(agentJobs, backend.AgentJob{
 			AgentID:    a.ID,
 			ScriptPath: a.ScriptPath,
-			Expression: expr,
+			Schedule:   *a.Meta.Schedule,
 		})
 	}
-	out.Scheduled = len(entries)
+	out.Scheduled = len(agentJobs)
 
-	if hasCrontab && out.Wrapper == HealthOK && out.Python3 == HealthOK {
-		aosBin, err := runtime.AosBinaryPath()
-		if err != nil {
-			out.Cron = CronSyncOutcome{State: CronSkipped, Reasons: []string{err.Error()}}
-		} else {
-			tickCmd := crontab.BuildTickCommand(aosBin, cfg.AosHome)
-			tickSchedule, tickErr := cfg.EffectiveTickCronExpr()
-			if tickErr != nil {
-				// Bad tick_interval doesn't fail the refresh — fall back to
-				// the default cadence (returned by EffectiveTickCronExpr) and
-				// surface the parse error so the operator can fix config.toml.
-				out.Warnings = append(out.Warnings,
-					fmt.Sprintf("%v; using default tick interval (%s)", tickErr, config.DefaultTickInterval))
-			}
-			result, err := crontab.SyncCrontab(crontab.SyncArgs{
-				Entries:      entries,
-				WrapperPath:  wrapperPath,
-				DataDir:      cfg.AosHome,
-				TickSchedule: tickSchedule,
-				TickCommand:  tickCmd,
-			})
-			switch {
-			case err != nil:
-				out.Cron = CronSyncOutcome{State: CronSkipped, Reasons: []string{err.Error()}}
-			case result.Conflict:
-				out.Cron = CronSyncOutcome{State: CronConflict}
-			case result.Wrote:
-				out.Cron = CronSyncOutcome{State: CronWrote}
-			default:
-				out.Cron = CronSyncOutcome{State: CronUnchanged}
-			}
-		}
-	} else {
+	interval, intervalErr := cfg.EffectiveTickInterval()
+	if intervalErr != nil {
+		out.Warnings = append(out.Warnings,
+			fmt.Sprintf("%v; using default tick interval (%s)", intervalErr, config.DefaultTickInterval))
+	}
+
+	be, beErr := backend.Select(cfg.AosHome)
+	if beErr != nil {
+		out.Backend = BackendSyncOutcome{State: "skipped", Reasons: []string{beErr.Error()}}
+	} else if out.Wrapper != HealthOK || out.Python3 != HealthOK {
 		reasons := []string{}
-		if !hasCrontab {
-			reasons = append(reasons, "no-crontab-bin")
-		}
 		if out.Wrapper != HealthOK {
 			reasons = append(reasons, "no-wrapper")
 		}
 		if out.Python3 != HealthOK {
 			reasons = append(reasons, "no-python3")
 		}
-		out.Cron = CronSyncOutcome{State: CronSkipped, Reasons: reasons}
+		out.Backend = BackendSyncOutcome{State: "skipped", Reasons: reasons}
+	} else {
+		aosBin, err := runtime.AosBinaryPath()
+		if err != nil {
+			out.Backend = BackendSyncOutcome{State: "skipped", Reasons: []string{err.Error()}}
+		} else {
+			spec := backend.Spec{
+				Agents: agentJobs,
+				Tick: backend.TickJob{
+					AosBinaryPath: aosBin,
+					LogPath:       filepath.Join(cfg.AosHome, "tick.log"),
+					Interval:      interval,
+				},
+			}
+			res, syncErr := be.Sync(spec)
+			if syncErr != nil {
+				out.Backend = BackendSyncOutcome{State: "skipped", Reasons: []string{syncErr.Error()}}
+			} else {
+				st, _ := be.State(spec)
+				out.Backend = BackendSyncOutcome{
+					State:     string(st),
+					Wrote:     res.Wrote,
+					Unchanged: res.Unchanged,
+					Removed:   res.Removed,
+				}
+				for _, f := range res.Failed {
+					out.Backend.Failed = append(out.Backend.Failed, fmt.Sprintf("%s: %s", f.AgentID, f.Reason))
+				}
+			}
+		}
+	}
+
+	if beErr == nil {
+		out.BackendHealth = HealthOK
+	} else {
+		out.BackendHealth = HealthMissing
+	}
+
+	if linger := probeLinger(); linger != "" {
+		out.LingerState = linger
 	}
 
 	trimmed, err := logtrim.Trim(filepath.Join(cfg.AosHome, "tick.log"), logtrim.DefaultMaxBytes, logtrim.DefaultKeepBytes)

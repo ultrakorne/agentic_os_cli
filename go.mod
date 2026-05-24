@@ -33,6 +33,7 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.20.0 // indirect
+	howett.net/plist v1.0.1 // indirect
 )
 
 replace charm.land/lipgloss/v2 => github.com/ultrakorne/lipgloss/v2 v2.0.0-20260517090606-39a8a2f7186a

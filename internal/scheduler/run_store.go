@@ -287,7 +287,6 @@ func (s *FileRunStore) writeMissedRun(id, agentID string, expectedAt time.Time) 
 	run := Run{
 		ID:            id,
 		AgentID:       agentID,
-		ScheduleID:    nil,
 		Trigger:       "schedule",
 		StartedAt:     startedAt,
 		StartedAtTime: expectedUTC,

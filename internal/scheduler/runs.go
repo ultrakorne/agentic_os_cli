@@ -25,7 +25,6 @@ const (
 type Run struct {
 	ID         string    `json:"id"`
 	AgentID    string    `json:"agentId"`
-	ScheduleID *string   `json:"scheduleId"`
 	Trigger    string    `json:"trigger"`
 	StartedAt  string    `json:"startedAt"`
 	EndedAt    *string   `json:"endedAt"`

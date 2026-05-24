@@ -4,37 +4,30 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/ultrakorne/aos_cli/internal/config"
-	"github.com/ultrakorne/aos_cli/internal/crontab"
 	"github.com/ultrakorne/aos_cli/internal/runtime"
+	"github.com/ultrakorne/aos_cli/internal/scheduler/backend"
 )
 
 // TickOutcome is the structured result of one scheduler tick. The on-disk
 // tick.log keeps its historical "[tick] ..." prefix (dashboard tail consumers
 // depend on it); this struct is the JSON wire format under --json.
-//
-// Missed counts miss records *newly written this tick*, not currently
-// outstanding. Catchups counts wrappers *spawned this tick*. Warnings holds
-// non-fatal step errors (miss-recording, catch-up spawn, tick-interval parse).
 type TickOutcome struct {
-	Timestamp string   `json:"timestamp"`
-	Scripts   int      `json:"scripts"`
-	Scheduled int      `json:"scheduled"`
-	Missed    int      `json:"missed"`
-	Catchups  int      `json:"catchups"`
-	Crontab   string   `json:"crontab"`
-	Warnings  []string `json:"warnings,omitempty"`
+	Timestamp     string   `json:"timestamp"`
+	Scripts       int      `json:"scripts"`
+	Scheduled     int      `json:"scheduled"`
+	Missed        int      `json:"missed"`
+	StaleResolved int      `json:"staleResolved"`
+	Backend       string   `json:"backend"`
+	Warnings      []string `json:"warnings,omitempty"`
 }
 
-// LogLine returns the single line the on-disk tick.log receives. Verb callers
-// can also print this to stdout when --json is not set, so the cron tail and
-// human verb output agree byte-for-byte.
+// LogLine returns the single line the on-disk tick.log receives.
 func (t TickOutcome) LogLine() string {
-	return fmt.Sprintf("[tick] %s scripts=%d scheduled=%d missed=%d catchups=%d crontab=%s\n",
-		t.Timestamp, t.Scripts, t.Scheduled, t.Missed, t.Catchups, t.Crontab)
+	return fmt.Sprintf("[tick] %s scripts=%d scheduled=%d missed=%d staleResolved=%d backend=%s\n",
+		t.Timestamp, t.Scripts, t.Scheduled, t.Missed, t.StaleResolved, t.Backend)
 }
 
 type TickDeps struct {
@@ -42,11 +35,8 @@ type TickDeps struct {
 	Now time.Time
 }
 
-// Tick runs one scheduler tick: scan agents, record missed slots, fire
-// catch-ups, compute crontab drift state, and append a summary to tick.log.
-// Returns the outcome regardless of whether the log write succeeded — only
-// pre-scan failures (no config, missing aos_home, scan error) produce an
-// error.
+// Tick runs one scheduler tick: scan agents, record missed slots, sweep
+// stale running runs, probe backend state, and append a summary to tick.log.
 func Tick(deps TickDeps) (TickOutcome, error) {
 	cfg := deps.Cfg
 	if cfg == nil || cfg.AosHome == "" {
@@ -69,40 +59,40 @@ func Tick(deps TickDeps) (TickOutcome, error) {
 		Timestamp: deps.Now.UTC().Format(time.RFC3339),
 		Scripts:   len(scan.Agents),
 		Scheduled: scheduled,
+		Backend:   "unknown",
 	}
 
 	missed, runs, missesErr := RecordMissedRuns(cfg.AosHome, scan.Agents, deps.Now)
 	if missesErr != nil {
-		// Don't fail the tick — the runs/cron side of the world is still
-		// authoritative even if a miss record didn't land this round.
 		out.Warnings = append(out.Warnings, fmt.Sprintf("record missed runs: %v", missesErr))
 	}
 	out.Missed = len(missed)
 
-	if cfg.EffectiveCatchupEnabled() {
-		// Reuse the runs slice RecordMissedRuns returned — it already
-		// reflects this tick's writes, so fireCatchups doesn't need a
-		// second load of the (potentially 2000-entry) runs/ dir.
-		store := NewFileRunStore(cfg.AosHome)
-		fired, warns, err := fireCatchups(cfg.AosHome, store, scan.Agents, runs, deps.Now)
-		if err != nil {
-			// Spawn failures don't fail the tick — same posture as miss
-			// recording. The next tick retries.
-			out.Warnings = append(out.Warnings, fmt.Sprintf("fire catch-ups: %v", err))
-		}
-		out.Warnings = append(out.Warnings, warns...)
-		out.Catchups = fired
+	store := NewFileRunStore(cfg.AosHome)
+	if n, swErr := SweepStaleRunning(store, runs, deps.Now, StaleRunningThreshold); swErr != nil {
+		out.Warnings = append(out.Warnings, fmt.Sprintf("sweep stale running: %v", swErr))
+	} else {
+		out.StaleResolved = n
 	}
 
-	tickSchedule, tickErr := cfg.EffectiveTickCronExpr()
-	if tickErr != nil {
-		// Same posture as refresh: log and fall back to the default cadence
-		// returned by EffectiveTickCronExpr. The next refresh will rewrite
-		// the cron block once the user fixes config.toml.
+	interval, intervalErr := cfg.EffectiveTickInterval()
+	if intervalErr != nil {
 		out.Warnings = append(out.Warnings,
-			fmt.Sprintf("%v; using default tick interval (%s)", tickErr, config.DefaultTickInterval))
+			fmt.Sprintf("%v; using default tick interval (%s)", intervalErr, config.DefaultTickInterval))
 	}
-	out.Crontab = crontabState(cfg.AosHome, scan.Agents, tickSchedule)
+
+	be, beErr := backend.Select(cfg.AosHome)
+	if beErr != nil {
+		out.Backend = "error(" + sanitizeForState(beErr.Error()) + ")"
+	} else {
+		spec := buildBackendSpec(cfg.AosHome, scan.Agents, interval)
+		st, err := be.State(spec)
+		if err != nil {
+			out.Backend = "error(" + sanitizeForState(err.Error()) + ")"
+		} else {
+			out.Backend = string(st)
+		}
+	}
 
 	if err := appendTickLog(filepath.Join(cfg.AosHome, "tick.log"), out.LogLine()); err != nil {
 		return out, fmt.Errorf("write tick.log: %w", err)
@@ -110,119 +100,51 @@ func Tick(deps TickDeps) (TickOutcome, error) {
 	return out, nil
 }
 
-// fireCatchups inspects per-agent latest run state and spawns wrapper.sh with
-// AGENTIC_OS_TRIGGER=catch-up for every agent whose latest run is missed.
-// Returns (fired, perAgentWarnings, fatalErr). Each spawn failure is captured
-// as a warning but does not short-circuit the loop — one broken agent
-// shouldn't block catch-ups for siblings. A missing wrapper is fatal because
-// nothing can be spawned at all.
-//
-// `runs` is the post-RecordMissedRuns view of the runs/ directory — pass it
-// through from Tick so a 2000-file directory isn't walked twice per tick.
-// `now` is the tick's reference time, used by DetectCatchups to enforce a
-// quiet window after a missed slot (see MinCatchupSlotAge).
-func fireCatchups(aosHome string, store *FileRunStore, agents []Agent, runs []Run, now time.Time) (int, []string, error) {
-	wrapperPath := filepath.Join(aosHome, "wrapper.sh")
-	if !runtime.FileExists(wrapperPath) || !runtime.IsExecutable(wrapperPath) {
-		// Mirrors aos run's posture: without a usable wrapper we can't spawn
-		// anything. Treat as a soft error so the tick's other work still lands.
-		return 0, nil, fmt.Errorf("%s missing or not executable", wrapperPath)
-	}
-	candidates := DetectCatchups(agents, runs, now)
-	var warnings []string
-	fired := 0
-	for _, c := range candidates {
-		err := SpawnWrapperDetached(wrapperPath, SpawnOpts{
-			AosHome:    aosHome,
-			ScheduleID: c.MissedSlot,
-			AgentID:    c.AgentID,
-			ScriptPath: c.ScriptPath,
-			RunID:      store.NewID(),
-			Trigger:    "catch-up",
-		})
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("catch-up %s: %v", c.AgentID, err))
+// buildBackendSpec assembles the backend.Spec the platform backends consume.
+// Used by both tick (for State drift checks) and refresh (for Sync).
+func buildBackendSpec(aosHome string, agents []Agent, interval time.Duration) backend.Spec {
+	jobs := make([]backend.AgentJob, 0)
+	for _, a := range agents {
+		if a.Meta.Schedule == nil {
 			continue
 		}
-		fired++
-	}
-	return fired, warnings, nil
-}
-
-// crontabState returns one of: managed | empty | conflict | drift | error(<msg>).
-// "drift" means: a managed block exists, but rebuilding it from the live
-// agents would produce a different block. tickSchedule is the configured tick
-// cron expression — passing it lets the drift check notice when the on-disk
-// block still references the previous schedule after the user edits
-// config.toml.
-func crontabState(dataDir string, agents []Agent, tickSchedule string) string {
-	if !runtime.HasBin("crontab") {
-		return "error(no-crontab-bin)"
-	}
-	text, err := crontab.ReadCrontab()
-	if err != nil {
-		return "error(" + sanitizeForState(err.Error()) + ")"
-	}
-	ex := crontab.ExtractManaged(text)
-	if ex.Conflict {
-		return "conflict"
-	}
-	if !ex.HasMarker {
-		if len(scheduledOnly(agents)) == 0 {
-			return "empty"
-		}
-		return "drift"
-	}
-
-	wrapperPath := filepath.Join(dataDir, "wrapper.sh")
-	entries := make([]crontab.Entry, 0)
-	for _, a := range scheduledOnly(agents) {
-		expr, err := CompileToCron(*a.Meta.Schedule)
-		if err != nil {
+		if len(a.Warnings) > 0 {
 			continue
 		}
-		entries = append(entries, crontab.Entry{
+		jobs = append(jobs, backend.AgentJob{
 			AgentID:    a.ID,
 			ScriptPath: a.ScriptPath,
-			Expression: expr,
+			Schedule:   *a.Meta.Schedule,
 		})
 	}
-	aosBin, err := runtime.AosBinaryPath()
-	if err != nil {
-		return "error(" + sanitizeForState(err.Error()) + ")"
+	aosBin, _ := runtime.AosBinaryPath()
+	return backend.Spec{
+		Agents: jobs,
+		Tick: backend.TickJob{
+			AosBinaryPath: aosBin,
+			LogPath:       filepath.Join(aosHome, "tick.log"),
+			Interval:      interval,
+		},
 	}
-	if crontab.MatchesTarget(text, crontab.SyncArgs{
-		Entries:      entries,
-		WrapperPath:  wrapperPath,
-		DataDir:      dataDir,
-		TickSchedule: tickSchedule,
-		TickCommand:  crontab.BuildTickCommand(aosBin, dataDir),
-	}) {
-		return "managed"
-	}
-	return "drift"
-}
-
-func scheduledOnly(agents []Agent) []Agent {
-	out := make([]Agent, 0)
-	for _, a := range agents {
-		if a.Meta.Schedule != nil {
-			out = append(out, a)
-		}
-	}
-	return out
 }
 
 // sanitizeForState scrubs an error string so it can sit inside the
-// "error(...)" wrapper used by the tick crontab-state enum without breaking
-// downstream string-tokenizers. Same shape the cmd-layer used before.
+// "error(...)" wrapper used by the tick backend-state enum without breaking
+// downstream string-tokenizers.
 func sanitizeForState(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, " ", "_")
-	if len(s) > 60 {
-		s = s[:60]
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\n' || c == ' ' {
+			out = append(out, '_')
+			continue
+		}
+		out = append(out, c)
 	}
-	return s
+	if len(out) > 60 {
+		out = out[:60]
+	}
+	return string(out)
 }
 
 func appendTickLog(path, line string) error {

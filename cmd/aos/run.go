@@ -110,8 +110,7 @@ func runStub(runID, agentID, startedAt string, estimateMillis ...int64) map[stri
 	}
 	return map[string]any{
 		"id":         runID,
-		"agentId":      agentID,
-		"scheduleId": nil,
+		"agentId":    agentID,
 		"trigger":    "manual",
 		"startedAt":  startedAt,
 		"endedAt":    nil,
