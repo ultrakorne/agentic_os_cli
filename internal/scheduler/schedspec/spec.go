@@ -62,9 +62,19 @@ func (s ScheduleSpec) NextSlot(after time.Time) time.Time {
 			}
 			allowed[time.Weekday(n)] = true
 		}
-		day := time.Date(after.Year(), after.Month(), after.Day(), s.Hour, s.Minute, 0, 0, loc)
+		// Anchor each candidate at s.Hour:s.Minute on its own calendar day
+		// rather than AddDate-stepping a single base. AddDate-stepping carries
+		// any DST normalization from the base day forward; per-day anchoring
+		// lets us catch the gap case below (e.g. 02:30 on spring-forward
+		// Sunday in DST zones doesn't exist; launchd/systemd don't fire, so
+		// we must skip too instead of returning the normalized 03:30 slot).
 		for i := 0; i < 8; i++ {
-			candidate := day.AddDate(0, 0, i)
+			d := after.AddDate(0, 0, i)
+			candidate := time.Date(d.Year(), d.Month(), d.Day(), s.Hour, s.Minute, 0, 0, loc)
+			if candidate.Hour() != s.Hour || candidate.Minute() != s.Minute {
+				// DST gap normalized the slot away — OS won't fire either.
+				continue
+			}
 			if !allowed[candidate.Weekday()] {
 				continue
 			}

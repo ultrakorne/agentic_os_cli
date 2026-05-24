@@ -144,10 +144,13 @@ func TestScheduleSpec_NextSlot_localTime(t *testing.T) {
 	}
 }
 
-func TestScheduleSpec_NextSlot_dstSpringForward(t *testing.T) {
+func TestScheduleSpec_NextSlot_dstSpringForwardSkipsGap(t *testing.T) {
 	// US Eastern: 2026-03-08 02:00 local → 03:00 local (spring forward).
-	// "Daily at 02:30" on Sun must skip into the next valid wall-clock instant
-	// time.Date normalizes for — time.Date normalizes 02:30 EST to 03:30 EDT.
+	// "Daily Sun at 02:30" must skip the spring-forward Sunday entirely,
+	// not roll the normalized 03:30 EDT into a fake slot. launchd's
+	// StartCalendarInterval and systemd's OnCalendar both refuse to fire
+	// on a non-existent local time; aos must agree to avoid emitting a
+	// phantom miss every spring-forward Sunday.
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		t.Skip("no tzdata available")
@@ -155,12 +158,28 @@ func TestScheduleSpec_NextSlot_dstSpringForward(t *testing.T) {
 	spec := ScheduleSpec{Kind: "daily", Days: []Weekday{Sun}, Hour: 2, Minute: 30}
 	after := time.Date(2026, 3, 8, 1, 0, 0, 0, loc)
 	got := spec.NextSlot(after)
-	// time.Date(... 2, 30, ...) on the missing hour day rolls forward to 03:30 EDT.
-	if got.IsZero() {
-		t.Fatalf("expected non-zero slot, got zero")
+	want := time.Date(2026, 3, 15, 2, 30, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Errorf("NextSlot across spring-forward gap = %v, want %v", got, want)
 	}
-	if !got.After(after) {
-		t.Errorf("slot %v not strictly after %v", got, after)
+}
+
+func TestScheduleSpec_NextSlot_dstFallBackPicksValidHour(t *testing.T) {
+	// US Eastern: 2026-11-01 02:00 EDT → 01:00 EST (fall back; 01:30 happens
+	// twice). Daily Sun at 01:30 must still produce a real slot. time.Date
+	// returns the standard-convention instance, which is well-defined.
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no tzdata available")
+	}
+	spec := ScheduleSpec{Kind: "daily", Days: []Weekday{Sun}, Hour: 1, Minute: 30}
+	after := time.Date(2026, 11, 1, 0, 0, 0, 0, loc)
+	got := spec.NextSlot(after)
+	if got.IsZero() {
+		t.Fatal("expected a slot on fall-back Sunday, got zero")
+	}
+	if got.Hour() != 1 || got.Minute() != 30 {
+		t.Errorf("slot wall-clock = %02d:%02d, want 01:30", got.Hour(), got.Minute())
 	}
 }
 
