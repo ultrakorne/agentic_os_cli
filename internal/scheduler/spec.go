@@ -3,8 +3,6 @@ package scheduler
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/ultrakorne/aos_cli/internal/scheduler/schedspec"
 )
@@ -23,8 +21,6 @@ const (
 	Fri = schedspec.Fri
 	Sat = schedspec.Sat
 )
-
-var weekdayToCron = schedspec.WeekdayToCron
 
 // AgentMeta mirrors the .meta.json sidecar shape.
 type AgentMeta struct {
@@ -48,50 +44,35 @@ func ParseMeta(data []byte) AgentMeta {
 	return m
 }
 
-func CompileToCron(s ScheduleSpec) (string, error) {
+// ValidateSchedule sanity-checks a ScheduleSpec for the same conditions
+// CompileToCron used to enforce. Used by `aos schedule` so the CLI rejects
+// nonsense before persisting it.
+func ValidateSchedule(s ScheduleSpec) error {
 	switch s.Kind {
 	case "hourly":
 		if s.EveryHours < 1 || s.EveryHours > 12 {
-			return "", fmt.Errorf("hourly.everyHours must be 1..12, got %d", s.EveryHours)
+			return fmt.Errorf("hourly.everyHours must be 1..12, got %d", s.EveryHours)
 		}
 		if s.Minute < 0 || s.Minute > 59 {
-			return "", fmt.Errorf("hourly.minute must be 0..59, got %d", s.Minute)
+			return fmt.Errorf("hourly.minute must be 0..59, got %d", s.Minute)
 		}
-		hourField := "*"
-		if s.EveryHours != 1 {
-			hourField = fmt.Sprintf("*/%d", s.EveryHours)
-		}
-		return fmt.Sprintf("%d %s * * *", s.Minute, hourField), nil
 	case "daily":
 		if len(s.Days) == 0 {
-			return "", fmt.Errorf("daily.days must include at least one weekday")
+			return fmt.Errorf("daily.days must include at least one weekday")
 		}
 		if s.Hour < 0 || s.Hour > 23 {
-			return "", fmt.Errorf("daily.hour must be 0..23, got %d", s.Hour)
+			return fmt.Errorf("daily.hour must be 0..23, got %d", s.Hour)
 		}
 		if s.Minute < 0 || s.Minute > 59 {
-			return "", fmt.Errorf("daily.minute must be 0..59, got %d", s.Minute)
+			return fmt.Errorf("daily.minute must be 0..59, got %d", s.Minute)
 		}
-		seen := map[int]struct{}{}
-		nums := make([]int, 0, len(s.Days))
 		for _, d := range s.Days {
-			n, ok := weekdayToCron[d]
-			if !ok {
-				return "", fmt.Errorf("unknown weekday %q", d)
+			if _, ok := schedspec.WeekdayToCron[d]; !ok {
+				return fmt.Errorf("unknown weekday %q", d)
 			}
-			if _, dup := seen[n]; dup {
-				continue
-			}
-			seen[n] = struct{}{}
-			nums = append(nums, n)
 		}
-		sort.Ints(nums)
-		parts := make([]string, len(nums))
-		for i, n := range nums {
-			parts[i] = fmt.Sprintf("%d", n)
-		}
-		return fmt.Sprintf("%d %d * * %s", s.Minute, s.Hour, strings.Join(parts, ",")), nil
 	default:
-		return "", fmt.Errorf("unknown schedule kind %q", s.Kind)
+		return fmt.Errorf("unknown schedule kind %q", s.Kind)
 	}
+	return nil
 }

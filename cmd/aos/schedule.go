@@ -114,7 +114,7 @@ func buildScheduleSpec(in scheduleInput) (*scheduler.ScheduleSpec, error) {
 			EveryHours: in.EveryHours,
 			Minute:     in.Minute,
 		}
-		if _, err := scheduler.CompileToCron(*spec); err != nil {
+		if err := scheduler.ValidateSchedule(*spec); err != nil {
 			return nil, err
 		}
 		return spec, nil
@@ -125,7 +125,7 @@ func buildScheduleSpec(in scheduleInput) (*scheduler.ScheduleSpec, error) {
 			Hour:   in.Hour,
 			Minute: in.Minute,
 		}
-		if _, err := scheduler.CompileToCron(*spec); err != nil {
+		if err := scheduler.ValidateSchedule(*spec); err != nil {
 			return nil, err
 		}
 		return spec, nil
@@ -264,9 +264,6 @@ func printScheduleHuman(id string, meta scheduler.AgentMeta, refresh scheduler.R
 				kvRow{Key: "minute", Value: fmt.Sprintf("%d", meta.Schedule.Minute)},
 			)
 		}
-		if cronExpr, err := scheduler.CompileToCron(*meta.Schedule); err == nil {
-			rows = append(rows, kvRow{Key: "cron", Value: cronExpr})
-		}
 		if meta.ScheduledAt != "" {
 			rows = append(rows, kvRow{Key: "scheduledAt", Value: meta.ScheduledAt})
 		}
@@ -287,11 +284,6 @@ func printScheduleJSON(id string, meta scheduler.AgentMeta, refresh scheduler.Re
 		"id":          id,
 		"schedule":    meta.Schedule,
 		"scheduledAt": nullIfEmpty(meta.ScheduledAt),
-	}
-	if meta.Schedule != nil {
-		if cronExpr, err := scheduler.CompileToCron(*meta.Schedule); err == nil {
-			payload["cron"] = cronExpr
-		}
 	}
 	if refErr != nil {
 		payload["refresh"] = map[string]any{"error": refErr.Error()}

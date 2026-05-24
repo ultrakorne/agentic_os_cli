@@ -32,7 +32,8 @@ func MissedRunID(agentID string, expectedAt time.Time) string {
 //   - updated: the post-write []Run. Same shape as a fresh store.Load
 //     would produce — stale miss records removed, new ones appended with
 //     StartedAtTime populated — so the caller can chain into a follow-up
-//     pass (DetectCatchups in aos tick) without re-reading the directory.
+//     pass (the stale-running sweep in aos tick) without re-reading the
+//     directory.
 func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRun, []Run, error) {
 	store := NewFileRunStore(aosHome)
 
@@ -66,8 +67,8 @@ func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRu
 			continue
 		}
 		// Mirror the disk delete in the in-memory slice so the returned
-		// view reflects what a fresh Load would produce — tick.fireCatchups
-		// chains off this slice.
+		// view reflects what a fresh Load would produce — tick's stale-running
+		// sweep chains off this slice.
 		for _, id := range stale {
 			runs = removeRunByID(runs, id)
 		}
@@ -78,7 +79,7 @@ func RecordMissedRuns(aosHome string, agents []Agent, now time.Time) ([]MissedRu
 }
 
 // removeRunByID returns runs with any entry matching id stripped. Order is
-// not preserved (callers re-sort as needed; DetectCatchups doesn't care).
+// not preserved (callers re-sort as needed).
 func removeRunByID(runs []Run, id string) []Run {
 	out := runs[:0]
 	for _, r := range runs {

@@ -193,10 +193,10 @@ func TestRecordMissedRuns_noScheduleNoOp(t *testing.T) {
 
 // TestRecordMissedRuns_returnedRunsMatchDisk pins the contract aos tick
 // relies on: the returned []Run is consistent with what a fresh LoadRuns
-// would produce, so the catch-up firing pass can chain off it without a
+// would produce, so the stale-running sweep can chain off it without a
 // second directory walk. Specifically: newly-written miss records appear in
-// the slice with StartedAtTime populated (so DetectCatchups can compare),
-// and stale miss records replaced this call are absent.
+// the slice with StartedAtTime populated, and stale miss records replaced
+// this call are absent.
 func TestRecordMissedRuns_returnedRunsMatchDisk(t *testing.T) {
 	home, dir := runsDir(t)
 	tickOne := time.Date(2026, 5, 16, 12, 30, 0, 0, time.UTC)
@@ -217,7 +217,7 @@ func TestRecordMissedRuns_returnedRunsMatchDisk(t *testing.T) {
 		t.Fatalf("returned slice = %+v, want [missed]", runsAfterOne)
 	}
 	if runsAfterOne[0].StartedAtTime.IsZero() {
-		t.Errorf("StartedAtTime not populated on returned miss — DetectCatchups would skip it")
+		t.Errorf("StartedAtTime not populated on returned miss — downstream consumers would skip it")
 	}
 
 	// Tick 2 replaces the slot-12 miss with a slot-13 miss. The returned

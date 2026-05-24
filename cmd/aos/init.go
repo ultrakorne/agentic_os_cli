@@ -79,6 +79,8 @@ func initFunc(cmd *cobra.Command, args []string) {
 	}
 	emitWarnings(refresh.Warnings)
 
+	maybePromptLinger(refresh)
+
 	if JSONOutput() {
 		if err := printJSON(map[string]any{
 			"mode":    mode,

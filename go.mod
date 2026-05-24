@@ -9,9 +9,9 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/pelletier/go-toml/v2 v2.3.1
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.44.0
+	howett.net/plist v1.0.1
 )
 
 require (
@@ -33,7 +33,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	howett.net/plist v1.0.1 // indirect
 )
 
 replace charm.land/lipgloss/v2 => github.com/ultrakorne/lipgloss/v2 v2.0.0-20260517090606-39a8a2f7186a

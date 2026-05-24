@@ -124,8 +124,8 @@ func collectInto(dir, section string, res *ScanResult, seen map[string]string) e
 		if !isExecutable(full) {
 			// File looks like an intended agent (right extension, or no-ext
 			// with shebang) but lacks +x. We still emit a record so the
-			// dashboard can nudge the user; refresh.go won't put a warned
-			// agent into the crontab.
+			// dashboard can nudge the user; refresh.go won't install a warned
+			// agent into the platform scheduler.
 			warnings = append(warnings, "not-executable")
 		}
 		id := strings.TrimSuffix(name, ext)

@@ -3,8 +3,6 @@ package scheduler
 import (
 	"sort"
 	"time"
-
-	"github.com/robfig/cron/v3"
 )
 
 // MissedRun is one uncovered scheduled slot for one agent.
@@ -22,30 +20,16 @@ type DetectOpts struct {
 const (
 	DefaultJitter   = 30 * time.Second
 	DefaultMaxTicks = 500
-	// lookbackBound caps how far back DetectMissed walks the cron schedule.
-	// The longest period any ScheduleSpec can produce is once-per-week
-	// (daily with a single weekday), so 8 days is enough to find the latest
-	// expected slot for any schedule we support.
+	// lookbackBound caps how far back DetectMissed walks the schedule. The
+	// longest period any ScheduleSpec can produce is once-per-week (daily
+	// with a single weekday), so 8 days is enough to find the latest
+	// expected slot.
 	lookbackBound = 8 * 24 * time.Hour
 )
 
-var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-
 // DetectMissed returns at most one MissedRun per agent: the most-recent
-// expected slot <= now that no run covers. By design we don't surface every
-// missed slot in a multi-slot outage — once the latest is recorded as a
-// Run{status:"missed"} on disk, rule (a) below covers it on subsequent
-// ticks. Replacement (one miss file per agent at a time) happens in
-// RecordMissedRuns.
-//
-// Coverage rules (isCovered):
-//
-//	(a) any run within ±jitter of the slot — regardless of status, so a
-//	    previously-recorded miss record at this slot acts as an ack and
-//	    prevents re-emission on the next tick.
-//	(b) any terminal run (success|error) at-or-after the slot — manual
-//	    catch-up or a later scheduled fire.
-//	(c) any running record at-or-after slot - jitter — wrapper in flight.
+// expected slot <= now that no run covers. See the original (cron-era)
+// algorithm comment in run_store.go.
 func DetectMissed(agents []Agent, runs []Run, opts DetectOpts) []MissedRun {
 	now := opts.Now
 	if now.IsZero() {
@@ -66,14 +50,6 @@ func DetectMissed(agents []Agent, runs []Run, opts DetectOpts) []MissedRun {
 		if a.Meta.Schedule == nil {
 			continue
 		}
-		expr, err := CompileToCron(*a.Meta.Schedule)
-		if err != nil {
-			continue
-		}
-		sched, err := cronParser.Parse(expr)
-		if err != nil {
-			continue
-		}
 
 		earliest := lookbackFloor
 		if a.Meta.ScheduledAt != "" {
@@ -84,19 +60,13 @@ func DetectMissed(agents []Agent, runs []Run, opts DetectOpts) []MissedRun {
 			}
 		}
 
-		// Walk forward and keep only the last slot <= now. cron/v3 has no
-		// Prev(), so we step through Next() and overwrite. The lookback
-		// floor + maxTicks bound the loop tightly.
-		//
-		// SpecSchedule.Next evaluates the cron expression in the cursor's
-		// location. The OS crontab daemon interprets entries in local time,
-		// so cursor must be local too — otherwise a `0 9 * * *` is computed
-		// at 09:00 UTC while cron fires at 09:00 local, and miss detection
-		// silently disagrees with reality on every non-UTC machine.
-		var latest time.Time
+		// Walk NextSlot forward from earliest, capturing the last slot <= now.
+		// Evaluate in now.Location() — the OS scheduler interprets schedules
+		// in local time.
 		cursor := earliest.In(now.Location()).Add(-time.Second)
+		var latest time.Time
 		for i := 0; i < maxTicks; i++ {
-			next := sched.Next(cursor)
+			next := a.Meta.Schedule.NextSlot(cursor)
 			if next.IsZero() || next.After(now) {
 				break
 			}
@@ -114,7 +84,6 @@ func DetectMissed(agents []Agent, runs []Run, opts DetectOpts) []MissedRun {
 		out = append(out, MissedRun{AgentID: a.ID, ExpectedAt: latest})
 	}
 	// Newest first so callers showing a "latest miss" view don't re-sort.
-	// There's only one entry per agent so this just orders agents.
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].ExpectedAt.After(out[j].ExpectedAt)
 	})
@@ -142,7 +111,7 @@ func isCovered(E time.Time, runs []Run, jitter time.Duration) bool {
 		if !t.Before(earliest) && !t.After(latest) {
 			return true
 		}
-		// (b) terminal run at-or-after the slot — manual catch-up or later fire.
+		// (b) terminal run at-or-after the slot — manual run or later fire.
 		if (r.Status == StatusSuccess || r.Status == StatusError) && !t.Before(E) {
 			return true
 		}

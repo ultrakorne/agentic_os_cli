@@ -43,27 +43,3 @@ func AosBinaryPath() (string, error) {
 	return abs, nil
 }
 
-// CronDaemonRunning reports whether a cron daemon process appears to be
-// running. (true, nil)=running, (false, nil)=not running but pgrep worked,
-// (false, err)=pgrep unavailable or all queries errored.
-func CronDaemonRunning() (bool, error) {
-	names := []string{"crond", "cron", "cronie"}
-	workedAtLeastOnce := false
-	for _, n := range names {
-		cmd := exec.Command("pgrep", "-x", n)
-		err := cmd.Run()
-		if err == nil {
-			return true, nil
-		}
-		if ee, ok := err.(*exec.ExitError); ok {
-			if ee.ExitCode() == 1 {
-				workedAtLeastOnce = true
-				continue
-			}
-		}
-	}
-	if workedAtLeastOnce {
-		return false, nil
-	}
-	return false, exec.ErrNotFound
-}

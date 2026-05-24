@@ -32,7 +32,7 @@ func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
 		trigger string
 	}{
 		{"manual", "manual"},
-		{"catch-up", "catch-up"},
+		{"schedule explicit", "schedule"},
 		{"schedule default", ""},
 	}
 	for _, tc := range cases {

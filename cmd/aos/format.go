@@ -41,9 +41,6 @@ func agentRecord(a scheduler.Agent, meta scheduler.AgentMeta) map[string]any {
 	}
 	if meta.Schedule != nil {
 		rec["schedule"] = meta.Schedule
-		if cronExpr, err := scheduler.CompileToCron(*meta.Schedule); err == nil {
-			rec["cron"] = cronExpr
-		}
 	}
 	if meta.ScheduledAt != "" {
 		rec["scheduledAt"] = meta.ScheduledAt

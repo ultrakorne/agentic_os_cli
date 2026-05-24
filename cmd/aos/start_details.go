@@ -596,8 +596,8 @@ func (m *detailsModel) blurAllInputs() {
 // saveAll persists description and schedule in one shot, the way a "save"
 // button is expected to behave. Both writes are skipped when the underlying
 // value didn't actually change — touching mtime for nothing would confuse any
-// downstream watcher. Cron reconcile is dispatched as a tea.Cmd so the shell
-// out to `crontab -l/-w` doesn't freeze the Update goroutine on slow disks.
+// downstream watcher. Backend reconcile is dispatched as a tea.Cmd so the
+// platform-tool subprocess doesn't freeze the Update goroutine on slow disks.
 func (m *detailsModel) saveAll() (*detailsModel, tea.Cmd) {
 	descTrimmed := strings.TrimRight(m.desc.Value(), "\n")
 	descChanged := descTrimmed != m.agent.Meta.Description
@@ -679,9 +679,9 @@ func (m *detailsModel) saveAll() (*detailsModel, tea.Cmd) {
 	cmds = append(cmds, func() tea.Msg {
 		return agentMetaUpdatedMsg{agentID: agentID, meta: meta}
 	})
-	// Reconcile cron in the background — runRefresh shells out to crontab
-	// and re-scans every agent meta. Surfacing the result via a tea.Msg
-	// keeps the UI responsive on slow systems.
+	// Reconcile the platform scheduler in the background — runRefresh shells
+	// out to launchctl/systemctl and re-scans every agent meta. Surfacing
+	// the result via a tea.Msg keeps the UI responsive on slow systems.
 	if schedChanged {
 		cmds = append(cmds, refreshScheduleCmd())
 	}
