@@ -42,6 +42,9 @@ type LaunchdLoader interface {
 	Bootstrap(plistPath string) error
 	Bootout(label string) error
 	IsLoaded(label string) (bool, error)
+	// Probe returns nil if the GUI domain is reachable. A real launchctl
+	// failure (binary missing, no GUI session) returns an error.
+	Probe() error
 }
 
 // NewLaunchd constructs a launchd backend rooted at the user's LaunchAgents dir.
@@ -255,7 +258,19 @@ func (b *LaunchdBackend) Sync(spec Spec) (SyncResult, error) {
 			}
 		}
 		if !writeNeeded {
-			res.Unchanged++
+			// Content matches, but launchctl may have been told to bootout
+			// the unit out-of-band (user debugging, partial uninstall). If
+			// it isn't loaded, re-bootstrap so the agent actually fires.
+			loaded, _ := b.loader.IsLoaded(label)
+			if loaded {
+				res.Unchanged++
+				continue
+			}
+			if err := b.loader.Bootstrap(path); err != nil {
+				res.Failed = append(res.Failed, FailedJob{AgentID: launchdLabelToAgentID(label), Reason: fmt.Sprintf("bootstrap: %v", err)})
+				continue
+			}
+			res.Wrote++
 			continue
 		}
 		buf, err := marshalLaunchdPlist(want)
@@ -355,8 +370,20 @@ func (b *LaunchdBackend) State(spec Spec) (State, error) {
 		if !launchdPlistEqual(got, want) {
 			return StateDrift, nil
 		}
+		// File matches the spec; verify the unit is actually loaded into
+		// launchd. A user-issued `launchctl bootout` outside aos leaves the
+		// file pristine but the agent silently dead — that's drift, not
+		// managed.
+		if loaded, _ := b.loader.IsLoaded(label); !loaded {
+			return StateDrift, nil
+		}
 	}
 	return StateManaged, nil
+}
+
+// Probe reports whether the user's launchd domain is reachable.
+func (b *LaunchdBackend) Probe() error {
+	return b.loader.Probe()
 }
 
 func (b *LaunchdBackend) listManaged() (map[string]string, error) {

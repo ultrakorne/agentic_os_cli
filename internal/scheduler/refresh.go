@@ -171,10 +171,13 @@ func Refresh(deps RefreshDeps) (RefreshOutcome, error) {
 		}
 	}
 
-	if beErr == nil {
-		out.BackendHealth = HealthOK
-	} else {
+	switch {
+	case beErr != nil:
 		out.BackendHealth = HealthMissing
+	case be.Probe() != nil:
+		out.BackendHealth = HealthDown
+	default:
+		out.BackendHealth = HealthOK
 	}
 
 	if linger := probeLinger(); linger != "" {

@@ -17,6 +17,7 @@ type fakeSystemdLoader struct {
 	enabled  []string
 	disabled []string
 	active   map[string]bool
+	probeErr error
 }
 
 func newFakeSystemd() *fakeSystemdLoader { return &fakeSystemdLoader{active: map[string]bool{}} }
@@ -33,6 +34,7 @@ func (f *fakeSystemdLoader) Disable(u string) error {
 	return nil
 }
 func (f *fakeSystemdLoader) IsActive(u string) (bool, error) { return f.active[u], nil }
+func (f *fakeSystemdLoader) Probe() error                    { return f.probeErr }
 
 func newSystemdBackend(t *testing.T) (*SystemdBackend, *fakeSystemdLoader, string) {
 	t.Helper()
@@ -45,6 +47,33 @@ func newSystemdBackend(t *testing.T) (*SystemdBackend, *fakeSystemdLoader, strin
 	fake := newFakeSystemd()
 	b := NewSystemd(aosHome).WithDir(dir).WithLoader(fake)
 	return b, fake, aosHome
+}
+
+// TestSystemdState_driftWhenTimerInactive covers the silent-dead case: unit
+// files on disk match the spec, but the timer was disabled out-of-band.
+// State must surface this as drift so `aos tick` doesn't claim managed.
+func TestSystemdState_driftWhenTimerInactive(t *testing.T) {
+	b, fake, aosHome := newSystemdBackend(t)
+	spec := Spec{
+		Agents: []AgentJob{{
+			AgentID:    "planner",
+			ScriptPath: filepath.Join(aosHome, "planner.sh"),
+			Schedule:   schedspec.ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 5},
+		}},
+	}
+	if _, err := b.Sync(spec); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	// Simulate external `systemctl --user disable agentic-os-planner.timer`.
+	delete(fake.active, "agentic-os-planner.timer")
+
+	st, err := b.State(spec)
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if st != StateDrift {
+		t.Errorf("State = %s, want drift (files match but timer inactive)", st)
+	}
 }
 
 func TestSystemdSync_writesAndEnablesAgent(t *testing.T) {

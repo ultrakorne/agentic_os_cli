@@ -49,3 +49,18 @@ func (l realLaunchdLoader) IsLoaded(label string) (bool, error) {
 		return false, err
 	}
 }
+
+// Probe checks whether the user's GUI launchd domain is reachable.
+// `launchctl print gui/$UID` prints domain status when accessible; it errors
+// when launchctl is missing or the user has no active GUI session.
+func (l realLaunchdLoader) Probe() error {
+	cmd := exec.Command("launchctl", "print", l.domain())
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() != 0 {
+		return fmt.Errorf("launchctl print %s: exit %d (%s)", l.domain(), ee.ExitCode(), strings.TrimSpace(string(out)))
+	}
+	return fmt.Errorf("launchctl: %w", err)
+}

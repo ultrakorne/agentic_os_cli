@@ -49,3 +49,19 @@ func (realSystemdLoader) IsActive(unitName string) (bool, error) {
 		return false, err
 	}
 }
+
+// Probe checks the user manager is reachable. `is-system-running` returns
+// non-zero when degraded but that's still reachable; we only treat a
+// non-ExitError (binary missing, can't exec) as unreachable.
+func (realSystemdLoader) Probe() error {
+	cmd := exec.Command("systemctl", "--user", "is-system-running")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		// Any exit-code response means systemd answered — reachable.
+		return nil
+	}
+	return fmt.Errorf("systemctl --user: %w (%s)", err, strings.TrimSpace(string(out)))
+}

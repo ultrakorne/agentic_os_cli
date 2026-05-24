@@ -36,6 +36,8 @@ type SystemdLoader interface {
 	Enable(unitName string) error
 	Disable(unitName string) error
 	IsActive(unitName string) (bool, error)
+	// Probe returns nil if the user manager is reachable.
+	Probe() error
 }
 
 // NewSystemd constructs a backend rooted at ~/.config/systemd/user.
@@ -465,8 +467,20 @@ func (b *SystemdBackend) State(spec Spec) (State, error) {
 		if !unitsEqualOnDisk(filepath.Join(b.dir, base+".timer"), want.timer) {
 			return StateDrift, nil
 		}
+		// Files match; the timer also has to be active. A user-issued
+		// `systemctl --user disable` outside aos leaves files pristine but
+		// the unit silently dead. Sync would heal on next refresh, but
+		// State must surface the gap so `aos tick`'s log says so.
+		if active, _ := b.loader.IsActive(base + ".timer"); !active {
+			return StateDrift, nil
+		}
 	}
 	return StateManaged, nil
+}
+
+// Probe reports whether the systemd-user manager is reachable.
+func (b *SystemdBackend) Probe() error {
+	return b.loader.Probe()
 }
 
 // listManaged returns base → present-on-disk for every aos-prefixed unit.

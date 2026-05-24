@@ -17,6 +17,7 @@ type fakeLaunchdLoader struct {
 	bootstrapped []string
 	booted       []string
 	loaded       map[string]bool
+	probeErr     error
 }
 
 func newFakeLaunchd() *fakeLaunchdLoader { return &fakeLaunchdLoader{loaded: map[string]bool{}} }
@@ -35,6 +36,7 @@ func (f *fakeLaunchdLoader) Bootout(label string) error {
 func (f *fakeLaunchdLoader) IsLoaded(label string) (bool, error) {
 	return f.loaded[label], nil
 }
+func (f *fakeLaunchdLoader) Probe() error { return f.probeErr }
 
 func newLaunchdBackend(t *testing.T) (*LaunchdBackend, *fakeLaunchdLoader, string) {
 	t.Helper()
@@ -47,6 +49,50 @@ func newLaunchdBackend(t *testing.T) (*LaunchdBackend, *fakeLaunchdLoader, strin
 	fake := newFakeLaunchd()
 	b := NewLaunchd(aosHome).WithDir(dir).WithLoader(fake)
 	return b, fake, aosHome
+}
+
+// TestLaunchdState_driftWhenBootedOutExternally covers the silent-dead case:
+// the plist file is on disk and matches the spec, but launchctl has been told
+// to bootout the unit (manual debugging, partial uninstall, etc.). State must
+// surface this as drift; Sync must heal it.
+func TestLaunchdState_driftWhenBootedOutExternally(t *testing.T) {
+	b, fake, aosHome := newLaunchdBackend(t)
+	spec := Spec{
+		Agents: []AgentJob{{
+			AgentID:    "planner",
+			ScriptPath: filepath.Join(aosHome, "planner.sh"),
+			Schedule:   schedspec.ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 5},
+		}},
+	}
+	if _, err := b.Sync(spec); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	// Simulate external bootout — file stays, launchd loses the unit.
+	delete(fake.loaded, "com.agenticos.planner")
+
+	st, err := b.State(spec)
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if st != StateDrift {
+		t.Errorf("State = %s, want drift (file matches but unit not loaded)", st)
+	}
+
+	// Sync should re-bootstrap without rewriting the file.
+	before := len(fake.bootstrapped)
+	res, err := b.Sync(spec)
+	if err != nil {
+		t.Fatalf("Sync recovery: %v", err)
+	}
+	if len(fake.bootstrapped) != before+1 {
+		t.Errorf("expected 1 additional Bootstrap call, got %d", len(fake.bootstrapped)-before)
+	}
+	if res.Wrote != 1 {
+		t.Errorf("res.Wrote = %d, want 1", res.Wrote)
+	}
+	if !fake.loaded["com.agenticos.planner"] {
+		t.Errorf("unit should be loaded after recovery Sync")
+	}
 }
 
 func TestLaunchdSync_writesAndBootstrapsAgent(t *testing.T) {

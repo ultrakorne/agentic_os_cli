@@ -18,6 +18,12 @@ type Backend interface {
 	Sync(spec Spec) (SyncResult, error)
 	Remove() error
 	State(spec Spec) (State, error)
+	// Probe checks whether the platform scheduler is reachable at all
+	// (launchd domain accessible, systemd-user manager running). Non-nil
+	// error means the daemon is wedged / not installed / not accessible —
+	// surfaces in refresh's BackendHealth field so the operator knows to
+	// look at the daemon, not at aos.
+	Probe() error
 }
 
 // Spec is the full set of jobs aos wants installed in one Sync call.
