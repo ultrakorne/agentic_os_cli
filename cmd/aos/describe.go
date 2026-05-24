@@ -16,9 +16,9 @@ var describeCmd = &cobra.Command{
 	Use:   "describe <id> [text]",
 	Short: "Show one agent (and optionally rewrite its description)",
 	Long: `Print the full record for a single agent: section, script path,
-schedule (compiled cron expression and structured spec), scheduledAt, and
-description. The JSON form matches the per-agent shape of ` + "`aos list --json`" + `
-so a client can use a single parser for both.
+schedule (structured spec), scheduledAt, and description. The JSON form
+matches the per-agent shape of ` + "`aos list --json`" + ` so a client can use a
+single parser for both.
 
 With a second positional argument, the description is written before the
 record is printed. An empty string clears it.`,
@@ -76,9 +76,6 @@ func printAgentHuman(rec map[string]any) error {
 	}
 	if sched, ok := rec["schedule"].(*scheduler.ScheduleSpec); ok && sched != nil {
 		rows = append(rows, kvRow{Key: "schedule", Value: summarizeSchedule(sched)})
-		if cronExpr, ok := rec["cron"].(string); ok {
-			rows = append(rows, kvRow{Key: "cron", Value: cronExpr})
-		}
 		if ts, ok := rec["scheduledAt"].(string); ok {
 			rows = append(rows, kvRow{Key: "scheduledAt", Value: ts})
 		}
