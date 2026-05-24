@@ -140,9 +140,7 @@ func estimateString(v any) string {
 	if !ok || ms < 0 {
 		return "none"
 	}
-	// Round to 100 ms (~1 decimal of a second) so the stub prints clean values
-	// like "1.2s" or "1m23.5s" instead of full ns-precision output.
-	return (time.Duration(ms) * time.Millisecond).Round(100 * time.Millisecond).String()
+	return formatDuration(time.Duration(ms) * time.Millisecond)
 }
 
 func init() {

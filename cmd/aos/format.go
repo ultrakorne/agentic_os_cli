@@ -20,6 +20,17 @@ func formatStartedAt(s string) string {
 	return t.Local().Format("2006-01-02 15:04:05")
 }
 
+// formatDuration renders an elapsed duration with at most one decimal of a
+// second under a minute ("1.2s", "200ms") and whole-second precision once it
+// crosses into minutes ("1m40s"). Rounds away the ns tail that creeps in when
+// callers only Truncate to milliseconds.
+func formatDuration(d time.Duration) string {
+	if d >= time.Minute {
+		return d.Round(time.Second).String()
+	}
+	return d.Round(100 * time.Millisecond).String()
+}
+
 func sanitize(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, " ", "_")

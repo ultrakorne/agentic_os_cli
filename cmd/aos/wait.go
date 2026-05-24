@@ -195,9 +195,9 @@ func (m waitModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m waitModel) View() tea.View {
-	elapsed := time.Since(m.startedAt).Truncate(time.Millisecond)
+	elapsed := time.Since(m.startedAt)
 	if useSpinner(m.estimate) {
-		return tea.NewView(fmt.Sprintf("%s %s\n", m.sp.View(), elapsed))
+		return tea.NewView(fmt.Sprintf("%s %s\n", m.sp.View(), formatDuration(elapsed)))
 	}
 	pct := float64(elapsed) / float64(m.estimate)
 	if pct > 0.99 {
@@ -206,5 +206,5 @@ func (m waitModel) View() tea.View {
 	if pct < 0 {
 		pct = 0
 	}
-	return tea.NewView(fmt.Sprintf("%s  %s\n", m.bar.ViewAs(pct), elapsed))
+	return tea.NewView(fmt.Sprintf("%s  %s\n", m.bar.ViewAs(pct), formatDuration(elapsed)))
 }
