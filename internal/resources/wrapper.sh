@@ -17,6 +17,13 @@
 
 set -uo pipefail
 
+# Every meta write goes through python3; without it the script would corrupt
+# records silently.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "wrapper.sh: python3 not found on PATH; cannot write run records" >&2
+  exit 127
+fi
+
 if [ $# -lt 3 ]; then
   echo "wrapper.sh: expected 3 args, got $#" >&2
   exit 64
@@ -93,11 +100,14 @@ PY
 }
 
 START="$(iso_now)"
-write_meta running "" ""
 
-# SIGTERM/SIGINT: launchd/systemd send SIGTERM on reload; capture so the run
-# record reflects the interruption rather than orphaning a "running" entry.
-trap 'END="$(iso_now)"; write_meta error "$END" 143 "interrupted by reload"; exit 143' SIGTERM SIGINT
+# SIGTERM/SIGINT: launchd/systemd send SIGTERM on reload. Set a flag and let
+# the foreground script exit naturally — a SIGTERM-aware script that flushes
+# state and exits 0 should still be recorded as success.
+INTERRUPTED=0
+trap 'INTERRUPTED=1' SIGTERM SIGINT
+
+write_meta running "" ""
 
 # On macOS, scripts that arrived via download/scp/airdrop carry a
 # `com.apple.quarantine` xattr and Gatekeeper blocks the interpreter with
@@ -115,6 +125,10 @@ EC=$?
 END="$(iso_now)"
 if [ "$EC" -eq 0 ]; then
   STATUS="success"
+  write_meta "$STATUS" "$END" "$EC"
+elif [ "$INTERRUPTED" = "1" ]; then
+  STATUS="error"
+  write_meta "$STATUS" "$END" "$EC" "interrupted by reload"
 else
   STATUS="error"
   # If a failing script produced no output, write a hint to the log so the
@@ -124,6 +138,5 @@ else
   if [ ! -s "$OUT" ]; then
     printf '[wrapper] script exited %d with no output.\nLikely cause: stdout was captured via $(...) or `cmd` and the script exited before replaying it. Capture stderr too (`$(cmd 2>&1)`) and echo it on failure.\n' "$EC" >"$OUT"
   fi
+  write_meta "$STATUS" "$END" "$EC"
 fi
-
-write_meta "$STATUS" "$END" "$EC"
