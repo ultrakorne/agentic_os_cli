@@ -1,14 +1,14 @@
 # AGENTS.md
 
-Go CLI (`aos`) that installs and manages the agentic_os runtime: writes `wrapper.sh` into the user's home, reconciles the crontab from agent definitions, and ticks the scheduler.
-This CLI owns the runtime — wrapper, crontab block, scheduler tick. The dashboard never writes runtime state directly; it shells out to `aos`.
+Go CLI (`aos`) that installs and manages the agentic_os runtime: writes `wrapper.sh` into the user's home, reconciles a platform-native scheduler (launchd LaunchAgents on macOS, systemd-user timer+service units on Linux) from agent definitions, and ticks the scheduler.
+This CLI owns the runtime — wrapper, platform scheduler entries, scheduler tick. The dashboard never writes runtime state directly; it shells out to `aos`.
 
 ## Code layout
 
 - `cmd/aos/` — cobra subcommands (`init`, `list`, `describe`, `schedule`, `run`, `runs`, `refresh`, `tick`, `uninstall`, `home`) plus shared package-local helpers in `format.go` (`sanitize`, `agentRecord`) and `style.go` (lipgloss palette, `printJSON`, `printKV`, `newTable`, `banner`, `statusStyle`)
 - `internal/config/` — paths, env, and config resolution
 - `internal/resources/` — files embedded into the binary at build time (`wrapper.sh` via `//go:embed`)
-- `internal/runtime/`, `internal/scheduler/`, `internal/crontab/`, `internal/logtrim/` — building blocks the commands wire together
+- `internal/runtime/`, `internal/scheduler/`, `internal/scheduler/backend/`, `internal/scheduler/schedspec/`, `internal/logtrim/` — building blocks the commands wire together. `backend/` holds the platform-native scheduler interface plus the launchd (`launchd_darwin.go`) and systemd-user (`systemd_linux.go`) implementations; `schedspec/` is the leaf package that defines `ScheduleSpec` (imported by both the scheduler core and the backends)
 - Tests live next to code as `*_test.go` (standard library `testing`)
 
 ## Commands

@@ -18,7 +18,8 @@ The TUI popup (`cmd/aos/start_details.go`) consumes the `AgentMeta` returned by 
 | `cmd/aos/format_test.go` | `agentRecord` shape tests |
 | `internal/scheduler/scanner.go` | Directory walk, extension/shebang gating, executability check, duplicate detection; delegates sidecar reads to `meta_store.ReadMeta` |
 | `internal/scheduler/scanner_test.go` | Scanner rules tests (extensions, sections, duplicates, hidden files, unreadable meta) |
-| `internal/scheduler/spec.go` | `Weekday`, `ScheduleSpec`, `AgentMeta` types; `CompileToCron`; `ParseMeta` (pure bytes-→-struct) |
+| `internal/scheduler/spec.go` | `AgentMeta` type, `ParseMeta` (pure bytes-→-struct), `ValidateSchedule`; type aliases re-exporting `schedspec.Weekday` / `schedspec.ScheduleSpec` |
+| `internal/scheduler/schedspec/spec.go` | Leaf package: `Weekday` constants, `ScheduleSpec` struct, `NextSlot` iterator (consumed by the backends and by `DetectMissed`) |
 | `internal/scheduler/meta_store.go` | Single sidecar I/O point: `ReadMeta`, `WriteSchedule`, `WriteDescription`, `SpecsEqual`; atomic write, empty-meta deletion |
 | `internal/scheduler/meta_store_test.go` | Sidecar round-trip + `scheduledAt` bump-on-change semantics |
 | `internal/scheduler/lookup.go` | `FindAgentByID` (used by `describe` and `schedule`); `NotFoundError` |
@@ -55,16 +56,17 @@ All fields are optional. `schedule.kind` is either `"hourly"` (carrying `everyHo
 - **Sidecar writes are atomic.** `writeMetaJSON` writes to `<path>.tmp` and `os.Rename`s on top of the target. A crash never leaves a half-written sidecar; a concurrent reader sees either the old or the new file, never garbage.
 - **One read path for sidecars.** `meta_store.ReadMeta(path)` is the only place that turns `<id>.meta.json` bytes into an `AgentMeta`: missing file → empty meta, no error; permission/I/O error → empty meta plus an error. The scanner calls into it (it does not re-implement reads). Write helpers (`WriteSchedule`, `WriteDescription`) return the resulting `AgentMeta` so callers — including the TUI popup — can update in-memory state without re-scanning.
 - **Day-set humanization is human-only.** `humanizeDays` in `list.go` collapses three canonical sets — `mon..fri` → `weekdays`, `sat,sun` → `weekends`, full week → `everyday`. The JSON payload always carries the explicit array.
-- **Hidden files and `__-prefixed` ids are skipped.** Dotfiles, `readme.md`, and any sidecar files (`*.meta.json`) are filtered out. Ids starting with `__` are reserved for managed cron entries (e.g. `__tick__`) and are dropped from scan results so a user can't accidentally collide with them.
+- **Hidden files and `__-prefixed` ids are skipped.** Dotfiles, `readme.md`, and any sidecar files (`*.meta.json`) are filtered out. Ids starting with `__` are reserved for the platform backend's tick entry (`__tick__`) and are dropped from scan results so a user can't accidentally collide with them.
 - **Shebang fallback for extensionless files.** A file without an extension is included if its first two bytes are `#!`. This lets a user drop a Python or Node script with just `agents/cleanup` and a `#!/usr/bin/env python3` first line, no `.sh` rename needed.
-- **`not-executable` agents stay in the listing but skip cron.** The scanner flags them so the dashboard can nudge the user; `aos refresh` walks `Warnings` and drops the agent from the managed block so cron never tries to exec a non-executable file. The count of warned-but-scheduled agents shows up as `issues++` in the refresh summary.
+- **`not-executable` agents stay in the listing but are excluded from the backend spec.** The scanner flags them so the dashboard can nudge the user; `aos refresh` walks `Warnings` and drops the agent from the `backend.Spec` it hands to `backend.Sync` so the platform scheduler never tries to exec a non-executable file. The count of warned-but-scheduled agents shows up as `issues++` in the refresh summary.
 - **Flag conflicts in `aos schedule` are rejected up-front.** `--every-hours` with `--hour`/`--days`, `--off` with anything else — `parseSchedFlags` returns an error before any disk write so the operator gets a clean diagnostic instead of a half-applied state.
 - **Days-string parser is strict.** Accepts a single comma list (`mon,wed,fri`) or a single inclusive range (`mon-fri`). Reverse ranges (`fri-mon`) and range-plus-comma (`mon-fri,sun`) error out — there's no canonicalization that's obviously correct, so the verb refuses to guess.
-- **A failed post-write refresh doesn't fail the verb.** `aos schedule` reports `refresh.error` in JSON (or a `warn:` line on stderr) but exits 0 — the sidecar write itself was the user's intent, and the next `aos refresh` will catch up the cron block.
+- **A failed post-write refresh doesn't fail the verb.** `aos schedule` reports `refresh.error` in JSON (or a `warn:` line on stderr) but exits 0 — the sidecar write itself was the user's intent, and the next `aos refresh` will reconcile the backend.
 
 ## Dependencies
 
-- `internal/scheduler` — scanner, sidecar store, cron compilation.
+- `internal/scheduler` — scanner, sidecar store, schedule validation.
+- `internal/scheduler/schedspec` — leaf type package (`ScheduleSpec`, `Weekday`).
 - `cmd/aos/refresh.go` (`RunRefresh`) — invoked in-process after `aos schedule` writes.
 - `github.com/spf13/cobra` — CLI plumbing.
 - `charm.land/lipgloss/v2` — table + key/value styling.

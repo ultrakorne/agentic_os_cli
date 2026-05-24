@@ -1,12 +1,12 @@
 sequenceDiagram
-    participant Cron as cron daemon
+    participant Be as platform backend<br/>(launchd / systemd-user)
     participant Tick as aos tick
     participant FS as runs/ + tick.log
-    participant Wrap as wrapper.sh
+    participant Backend as backend.State
 
-    Cron->>Tick: invoke at tick_interval
+    Be->>Tick: invoke at tick_interval
     Tick->>Tick: scan <aos_home>/agents/
-    Tick->>FS: LoadRuns(runs/)
+    Tick->>FS: FileRunStore.Load(runs/)
     Tick->>Tick: DetectMissed (latest uncovered slot per agent)
 
     alt new misses found
@@ -16,13 +16,15 @@ sequenceDiagram
         Tick->>Tick: skip (idempotent)
     end
 
-    alt catchup_enabled
-        Tick->>Tick: DetectCatchups (latest run == missed?)
-        loop per candidate
-            Tick->>Wrap: SpawnWrapperDetached (TRIGGER=catch-up)
-            Wrap-->>FS: writes <run-id>.json running → success|error
-        end
+    Tick->>Tick: SweepStaleRunning (running > 1h → error)
+    alt stale records found
+        Tick->>FS: rewrite <id>.json with status=error,<br/>error="no completion record", exitCode=1
     end
 
+    Tick->>Backend: backend.State(spec)
+    Backend-->>Tick: managed | drift | empty | error(...)
+
     Tick->>FS: append "[tick] ..." to tick.log
-    Tick-->>Cron: exit 0 (stdout: log line or JSON summary)
+    Tick-->>Be: exit 0 (stdout: log line or JSON outcome)
+
+    Note over Be: Missed slots while asleep<br/>are re-fired natively by<br/>launchd / Persistent=true.<br/>aos does NOT dispatch them.

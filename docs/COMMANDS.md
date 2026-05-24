@@ -18,16 +18,16 @@ both surfaces consistent: every `--json` branch funnels through `printJSON`
 
 | Command | Role |
 |---------|------|
-| [`aos init <path>`](#aos-init) | Create the aos home, write `wrapper.sh`, sync crontab |
+| [`aos init <path>`](#aos-init) | Create the aos home, write `wrapper.sh`, sync platform backend |
 | [`aos home`](#aos-home) | Print the configured `aos_home` path |
-| [`aos refresh`](#aos-refresh) | Rescan agents and rewrite the managed crontab block |
-| [`aos tick`](#aos-tick) | One scheduler tick (cron invokes this on the configured `tick_interval`, default every 10 min) |
+| [`aos refresh`](#aos-refresh) | Rescan agents and reconcile the platform backend (launchd / systemd-user) |
+| [`aos tick`](#aos-tick) | One scheduler tick (the platform backend invokes this on the configured `tick_interval`, default every hour) |
 | [`aos list`](#aos-list) | Enumerate every agent with section, schedule summary, description |
 | [`aos describe <id> [text]`](#aos-describe) | Show one agent's full record; optionally rewrite its description |
-| [`aos schedule <id> ...`](#aos-schedule) | Set or clear an agent's schedule; auto-refreshes cron |
+| [`aos schedule <id> ...`](#aos-schedule) | Set or clear an agent's schedule; auto-refreshes the backend |
 | [`aos run <id>`](#aos-run) | Fire a manual run; prints the `Run` stub (optional `--wait` blocks until done and prints `.out`) |
 | [`aos runs [run-id]`](#aos-runs) | List recent runs, or show one by id (single-run prints the captured .out inline) |
-| [`aos uninstall`](#aos-uninstall) | Remove wrapper, managed crontab block, and config |
+| [`aos uninstall`](#aos-uninstall) | Remove wrapper, platform backend entries, tick.log, and config |
 
 ---
 
@@ -40,10 +40,12 @@ aos init <path> --json
 
 Creates the aos home directory (`<path>`), writes `wrapper.sh` and seed
 `agents/` + `runs/` subdirectories, stores `<path>` in
-`~/.config/aos/config.toml`, and runs a `refresh` to install the managed
-crontab block. If a previous home was configured and points elsewhere,
-contents are relocated to the new path (rename when possible,
-copy+remove across filesystems).
+`~/.config/aos/config.toml`, and runs a `refresh` to install the platform-native
+scheduler entries (launchd LaunchAgents under `~/Library/LaunchAgents/com.agenticos.*`
+on macOS, systemd-user `.timer`+`.service` pairs under `~/.config/systemd/user/agentic-os-*`
+on Linux). If a previous home was configured and points elsewhere, contents
+are relocated to the new path (rename when possible, copy+remove across
+filesystems).
 
 The config file is written with every tunable populated at its default so
 the available knobs are visible without reading docs:
@@ -51,19 +53,22 @@ the available knobs are visible without reading docs:
 ```toml
 aos_home = '/home/you/aos_home'
 runs_hard_cap = 2000
-catchup_enabled = true
-tick_interval = "10m"
+tick_interval = "1h"
 ```
 
-Re-running `aos init` preserves user-set values for `runs_hard_cap`,
-`catchup_enabled`, and `tick_interval`; only `aos_home` is updated to the
-new path. `tick_interval` is a Go duration string — accepted forms are
-whole minutes `"1m"`–`"59m"` (compiled to `*/N * * * *`) or whole hours
-`"1h"`–`"23h"` (compiled to `0 */H * * *`). Anything else (e.g. `"90m"`,
-`"24h"`, sub-minute precision) is rejected: `aos refresh` and `aos tick`
-log the parse error to stderr and fall back to the default `"10m"`
-schedule. Edit the value and run `aos refresh` to reschedule the managed
-`__tick__` cron entry.
+Re-running `aos init` preserves user-set values for `runs_hard_cap` and
+`tick_interval`; only `aos_home` is updated to the new path. `tick_interval`
+is a Go duration string and must be at least 1 minute (`"1m"`, `"30m"`,
+`"1h"`, `"6h"`, …). Anything sub-minute or unparseable is rejected:
+`aos refresh` and `aos tick` log the parse error to stderr and fall back
+to the default `"1h"`. Edit the value and run `aos refresh` to reschedule
+the platform backend's tick entry.
+
+On Linux, after the refresh, init inspects the linger probe result. When
+linger is off on a headless session (`XDG_SESSION_TYPE` empty or `"tty"`)
+and the operator is at a TTY, init prints a warning and offers to run
+`sudo loginctl enable-linger $USER` interactively. Under `--json` the
+prompt is skipped; the state is still in `refresh.lingerState`.
 
 **Human output** (styled key/value block):
 
@@ -73,9 +78,15 @@ mode     fresh
 home     /home/ultra/Developer/aos_home
 wrapper  wrote
 — refresh —
-agents     2
-scheduled  1
-…
+agents         2
+scheduled      1
+issues         0
+backend        managed:(wrote=2 unchanged=0)
+wrapper        ok
+python3        ok
+backendHealth  ok
+log            untouched
+runs           untouched
 ```
 
 **JSON output:**
@@ -85,7 +96,7 @@ scheduled  1
   "mode": "fresh",
   "home": "/home/ultra/Developer/aos_home",
   "wrapper": "wrote",
-  "refresh": { "agents": 2, "scheduled": 1, ... }
+  "refresh": { "agents": 2, "scheduled": 1, "backend": { "state": "managed", "wrote": 2 }, ... }
 }
 ```
 
@@ -109,28 +120,34 @@ hasn't run yet.
 aos refresh [--json]
 ```
 
-Rescans `<aos_home>/agents/`, recomputes the managed crontab section from each
-agent's `<id>.meta.json` sidecar, records any newly-detected missed runs into
-`<aos_home>/runs/` (see `aos tick` and `aos runs` for the miss model), and
-trims `tick.log` if it's too big. Reconciliation is idempotent — running
-twice in a row is a no-op.
+Rescans `<aos_home>/agents/`, records any newly-detected missed runs into
+`<aos_home>/runs/` (see `aos tick` and `aos runs` for the miss model), calls
+`backend.Sync` to reconcile the platform-native scheduler (write / update /
+remove plists on macOS or `.timer`+`.service` pairs on Linux; bootstrap or
+`enable --now` each), trims `tick.log` if it's too big, and sweeps `runs/`
+down to `runs_hard_cap`. Reconciliation is idempotent — running twice in
+a row is a no-op (`backend.wrote=0`, `backend.unchanged=N`).
 
 **Human output** (styled key/value block):
 ```
 aos refresh
-agents     2
-scheduled  1
-issues     0
-cron       wrote
-wrapper    ok
-python3    ok
-daemon     ok
-log        untouched
+agents         2
+scheduled      1
+issues         0
+backend        managed:(wrote=0 unchanged=2)
+wrapper        ok
+python3        ok
+backendHealth  ok
+linger         ok
+log            untouched
+runs           untouched
 ```
 
-Health fields (`cron`, `wrapper`, `python3`, `daemon`, `log`) are colored
-green/yellow/red so a degraded install (missing wrapper, cron daemon down,
-etc.) stands out without reading every line.
+Health fields (`wrapper`, `python3`, `backendHealth`, `linger`) are colored
+green/yellow/red so a degraded install (missing wrapper, no python3, linger
+off on a headless host, …) stands out without reading every line.
+
+`linger` appears only on Linux.
 
 **JSON output:**
 ```json
@@ -138,16 +155,27 @@ etc.) stands out without reading every line.
   "agents": 2,
   "scheduled": 1,
   "issues": 0,
-  "cron": "wrote",
+  "backend": {
+    "state": "managed",
+    "wrote": 0,
+    "unchanged": 2,
+    "removed": 0
+  },
   "wrapper": "ok",
   "python3": "ok",
-  "daemon": "ok",
-  "log": "untouched"
+  "backendHealth": "ok",
+  "lingerState": "ok",
+  "log": { "trimmed": false },
+  "runs": { "deleted": 0 }
 }
 ```
 
-Cron field values: `wrote | unchanged | skipped:<reason>`. Reasons stack
-(`skipped:no-crontab-bin,no-python3`).
+`backend.state` values: `managed | drift | empty | skipped`. When skipped,
+`backend.reasons` carries the cause(s) (`no-wrapper`, `no-python3`, an
+underlying error). `backend.failed` is omitted when empty; otherwise each
+entry is `"<agent-id>: <reason>"`.
+
+`lingerState` is omitted on macOS.
 
 ## `aos tick`
 
@@ -156,32 +184,35 @@ aos tick
 aos tick --json
 ```
 
-Invoked by cron via the managed `__tick__` line at the cadence set by
-`tick_interval` in `config.toml` (default every 10 minutes). Three things
-happen each tick, in order:
+Invoked by the platform backend's tick entry (a `com.agenticos.__tick__`
+LaunchAgent on macOS or the `agentic-os-tick.timer` user timer on Linux)
+at the cadence set by `tick_interval` in `config.toml` (default every
+hour). Each tick does, in order:
 
 1. **Detect missed slots.** For each scheduled agent, find the most-recent
    uncovered slot ≤ now and persist it as `runs/miss-<agent>-<expectedAt>.json`
-   with `status:"missed"`.
-2. **Fire catch-ups** (unless disabled in config). For each agent whose
-   *latest* run on disk is `status:"missed"`, spawn `wrapper.sh` detached
-   with `AGENTIC_OS_TRIGGER=catch-up` and the missed slot's RFC3339 stamp
-   as `scheduleId`. The trigger condition is strict: any other status
-   (`running`, `success`, `error`) on the latest run skips the catch-up,
-   so a failed catch-up does **not** auto-retry.
-3. **Log a summary** to `<aos_home>/tick.log`.
+   with `status:"missed"`. The platform backend's native make-up-on-wake
+   (implicit on launchd; `Persistent=true` on systemd timers) handles
+   actually re-firing the slot — aos does not dispatch a follow-up run.
+2. **Sweep stale running records.** Any `Run` with `status="running"` and
+   `startedAt` older than 1 hour is rewritten to `status="error"`,
+   `error="no completion record"`, `exitCode=1`. Covers wrappers killed
+   mid-run by a backend reload, OOM, or power loss.
+3. **Probe backend drift.** Call `backend.State(spec)` and surface the
+   result string.
+4. **Log a summary** to `<aos_home>/tick.log`.
 
-The default stdout form mirrors the log line; `--json` emits a
-`TickSummary` record:
+The default stdout form mirrors the log line; `--json` emits a `TickOutcome`
+record:
 
 ```json
 {
-  "timestamp": "2026-05-16T13:00:00Z",
+  "timestamp": "2026-05-24T13:00:00Z",
   "scripts": 2,
   "scheduled": 1,
   "missed": 0,
-  "catchups": 0,
-  "crontab": "managed"
+  "staleResolved": 0,
+  "backend": "managed"
 }
 ```
 
@@ -193,18 +224,15 @@ deliberate granularity loss (multi-slot outages collapse to one entry) lets
 the dashboard surface "agents currently behind" as a one-row-per-agent
 banner that auto-resolves on the next real run.
 
-The `catchups` field counts wrappers actually spawned this tick. Once a
-catch-up writes its `running` record it is no longer the same agent's
-"latest = missed", so subsequent ticks don't double-fire. Catch-up runs
-appear in `aos runs` with `trigger:"catch-up"` and the missed slot's
-timestamp as `scheduleId`.
+The `staleResolved` field counts `running`→`error` rewrites this tick.
 
-To disable catch-up auto-fire, set `catchup_enabled = false` in
-`~/.config/aos/config.toml`; tick will still detect and record misses,
-but won't spawn the catch-up wrapper.
+The `backend` field is one of `managed | drift | empty | error(<msg>)`.
 
-The `tick.log` line format is unchanged regardless of `--json` — it's a
-separate concern from stdout.
+The `tick.log` line format is independent of `--json` — it's always:
+
+```
+[tick] 2026-05-24T13:00:00Z scripts=2 scheduled=1 missed=0 staleResolved=0 backend=managed
+```
 
 ## `aos list`
 
@@ -218,10 +246,10 @@ names. Duplicate ids are dropped (first-wins) and surfaced as issues.
 
 **Human output** is a styled lipgloss table:
 ```
-╭───────────────┬───────────┬────────────────┬──────────┬──────────────────┮
+╭───────────────┬───────────┬────────────────┬──────────┬──────────────────╮
 │ ID            │ SECTION   │ SCHEDULE       │ WARNINGS │ DESCRIPTION      │
 ├───────────────┼───────────┼────────────────┼──────────┼──────────────────┤
-│ daily_planner │ assistant │ -              │ -        │ What did I do... │
+│ daily_planner │ Assistant │ -              │ -        │ What did I do... │
 │ ping          │ Agents    │ weekdays 23:00 │ -        │ -                │
 ╰───────────────┴───────────┴────────────────┴──────────┴──────────────────╯
 ```
@@ -244,7 +272,6 @@ the table.
       "section": "Agents",
       "scriptPath": "/.../agents/ping.sh",
       "schedule": { "kind": "daily", "days": ["mon", "tue", "wed", "thu", "fri"], "hour": 23, "minute": 0 },
-      "cron": "0 23 * * 1,2,3,4,5",
       "scheduledAt": "2026-05-15T20:50:04.341Z"
     }
   ],
@@ -252,8 +279,11 @@ the table.
 }
 ```
 
-Optional fields (`schedule`, `cron`, `scheduledAt`, `description`) are
-**omitted** when unset, not set to `null`.
+Optional fields (`schedule`, `scheduledAt`, `description`, `title`, `warnings`)
+are **omitted** when unset, not set to `null`. There is no `cron` field on
+the agent record — the structured `schedule` is the contract; the per-platform
+file format (launchd `StartCalendarInterval` / systemd `OnCalendar`) is an
+internal rendering detail of the backend.
 
 ## `aos describe`
 
@@ -274,14 +304,14 @@ aos describe ping
 section      Agents
 script       /.../agents/ping.sh
 schedule     weekdays 23:00
-cron         0 23 * * 1,2,3,4,5
 scheduledAt  2026-05-15T20:50:04.341Z
 description  -
 ```
 
 **JSON output:** same per-agent shape as `aos list --json` items.
 
-The write form does not trigger a refresh — descriptions don't affect cron.
+The write form does not trigger a refresh — descriptions don't affect the
+platform backend.
 
 ## `aos schedule`
 
@@ -291,9 +321,9 @@ aos schedule <id> --hour H --minute M --days <list-or-range>  # daily
 aos schedule <id> --off                                    # clear
 ```
 
-Sets or clears an agent's schedule, then runs `refresh` in-process so cron
-reflects the change immediately. The schedule **kind is inferred from the
-flags** you pass — there is no `--kind` flag.
+Sets or clears an agent's schedule, then runs `refresh` in-process so the
+platform backend reflects the change immediately. The schedule **kind is
+inferred from the flags** you pass — there is no `--kind` flag.
 
 | Flag | Used by | Notes |
 |------|---------|-------|
@@ -312,8 +342,7 @@ winner.
 - `mon-fri` — inclusive range (week order is `sun..sat`)
 
 Reverse ranges (`fri-mon`) and range-plus-comma forms (`mon-fri,sun`) are
-rejected. The compiled cron expression uses cron weekday numbering
-(`sun=0..sat=6`).
+rejected.
 
 **Human output** (styled key/value block plus the refresh summary):
 ```
@@ -322,7 +351,6 @@ kind         daily
 days         mon,tue,wed,thu,fri
 hour         9
 minute       0
-cron         0 9 * * 1,2,3,4,5
 scheduledAt  2026-05-16T...
 — refresh —
 agents     2
@@ -343,9 +371,8 @@ schedule  cleared
 {
   "id": "ping",
   "schedule": { "kind": "daily", "days": ["mon", ...], "hour": 9, "minute": 0 },
-  "cron": "0 9 * * 1,2,3,4,5",
   "scheduledAt": "2026-05-16T...",
-  "refresh": { "agents": 2, "scheduled": 2, ... }
+  "refresh": { "agents": 2, "scheduled": 2, "backend": { "state": "managed", "wrote": 1 }, ... }
 }
 ```
 
@@ -364,11 +391,11 @@ aos run <id> --wait --json    # spawn, print stub JSON, block, then append .out
 ```
 
 Looks up the agent by id, estimates duration from the newest successful runs
-for that agent (up to 10), mints a run id (`<unix>-<pid>-<rand><rand>`),
-spawns `wrapper.sh` detached (`setsid`) with `AGENTIC_OS_TRIGGER=manual` and
-the explicit run id as the wrapper's 5th argv, then prints a `Run` stub.
-The wrapper writes the final record under `<aos_home>/runs/<run-id>.json`
-once the script exits — poll for it (or watch the file) to see the result.
+for that agent (up to 10), mints a run id (`<unix-ms>-<rand4>`), spawns
+`wrapper.sh` detached (`setsid`) with `AGENTIC_OS_TRIGGER=manual` and the
+explicit run id as the wrapper's 4th argv, then prints a `Run` stub. The
+wrapper writes the final record under `<aos_home>/runs/<run-id>.json` once
+the script exits — poll for it (or watch the file) to see the result.
 
 The estimate uses only `success` records with parseable `startedAt` and
 `endedAt` — `error`, `running`, and `missed` runs are skipped so a
@@ -383,10 +410,10 @@ absent / not executable.
 **Human output** (styled key/value block; `status` colored amber):
 ```
 aos run ping
-run        1778936977-29334-...
+run        1778936977-a93c
 status     running
-estimate   2.031s
-startedAt  2026-05-16T13:09:37.061Z
+estimate   2.0s
+startedAt  2026-05-16 13:09:37
 ```
 
 **JSON output:** the same shape as `aos runs <run-id> --json` with
@@ -443,12 +470,12 @@ A muted `showing N of M runs` line precedes the table so it's obvious when
 `--limit` is hiding records:
 ```
 showing 2 of 14 runs
-╭──────────────────────────────────────┬───────┬─────────┬──────────┬─────────────────────┬─────────╮
-│ RUN-ID                               │ AGENT │ STATUS  │ TRIGGER  │ STARTED             │ ELAPSED │
-├──────────────────────────────────────┼───────┼─────────┼──────────┼─────────────────────┼─────────┤
-│ 1778936977-29334-5144069401071970568 │ ping  │ success │ manual   │ 2026-05-16 13:09:37 │ 2.031s  │
-│ 1778878800-542403-1886130594         │ ping  │ success │ schedule │ 2026-05-15 21:00:00 │ 2.029s  │
-╰──────────────────────────────────────┴───────┴─────────┴──────────┴─────────────────────┴─────────╯
+╭──────────────────┬───────┬─────────┬──────────┬─────────────────────┬─────────╮
+│ RUN-ID           │ AGENT │ STATUS  │ TRIGGER  │ STARTED             │ ELAPSED │
+├──────────────────┼───────┼─────────┼──────────┼─────────────────────┼─────────┤
+│ 1778936977-a93c  │ ping  │ success │ manual   │ 2026-05-16 13:09:37 │ 2.031s  │
+│ 1778878800-1b40  │ ping  │ success │ schedule │ 2026-05-15 21:00:00 │ 2.029s  │
+╰──────────────────┴───────┴─────────┴──────────┴─────────────────────┴─────────╯
 ```
 
 `STATUS` is colored amber (running), green (success), red (error), or
@@ -474,13 +501,16 @@ appear in the timeline alongside real runs. Shape:
 Only **one** miss record per agent exists on disk at any time. When a newer
 uncovered slot is detected, the previous miss for that agent is deleted and
 replaced — multi-slot outages deliberately collapse to one entry so the
-dashboard's "agents currently behind" banner is one row per agent.
+dashboard's "agents currently behind" banner is one row per agent. Aos does
+**not** dispatch a follow-up run for the miss; the platform backend's native
+make-up-on-wake re-fires the schedule on its own (launchd's behavior for
+`StartCalendarInterval` jobs, systemd's `Persistent=true` on `.timer` units).
 
 **Human single-run output** (styled key/value block with the run-id as banner,
 followed by the captured stdout/stderr from the `.out` file as a labeled
 section):
 ```
-aos runs 1778936977-29334-...
+aos runs 1778936977-a93c
 agent       ping
 status      success
 trigger     manual
@@ -488,7 +518,7 @@ startedAt   2026-05-16 13:09:37
 endedAt     2026-05-16 13:09:39
 elapsed     2.031s
 exit        0
-outputPath  1778936977-29334-5144069401071970568.out
+outputPath  1778936977-a93c.out
 
 output
 ping at 2026-05-16T13:09:39Z
@@ -503,9 +533,8 @@ output, use `aos runs <id> --json | jq -r .output`.
 {
   "runs": [
     {
-      "id": "1778936977-29334-...",
+      "id": "1778936977-a93c",
       "agentId": "ping",
-      "scheduleId": null,
       "trigger": "manual",
       "startedAt": "2026-05-16T13:09:37.072Z",
       "endedAt": "2026-05-16T13:09:39.103Z",
@@ -513,11 +542,16 @@ output, use `aos runs <id> --json | jq -r .output`.
       "output": "",
       "error": null,
       "exitCode": 0,
-      "outputPath": "1778936977-29334-....out"
+      "outputPath": "1778936977-a93c.out"
     }
   ]
 }
 ```
+
+The `Run` record has no `scheduleId` field — the cron-era concept of "missed
+slot id attached to a catch-up run" is gone, since catch-ups themselves are
+gone (native makeup replaces them). `trigger` is one of `schedule` or
+`manual`; there is no `catch-up` value.
 
 **JSON single-run output:** the inner record only (no `runs` wrapper), with
 the `output` field populated from the run's `.out` file (empty string when
@@ -531,31 +565,37 @@ aos uninstall
 aos uninstall --json
 ```
 
-Removes the managed crontab block, deletes the installed `wrapper.sh`, and
-removes `~/.config/aos/config.toml`. The `agents/` and `runs/` directories
-are **left untouched** — they contain user data.
+Removes the installed `wrapper.sh`, the `tick.log`, the platform backend
+entries (via `backend.Remove()` — boots-out every LaunchAgent in the
+`com.agenticos.*` namespace on macOS, or disables and unlinks every
+`.timer`+`.service` pair in the `agentic-os-*` namespace on Linux), and
+`~/.config/aos/config.toml`. The `agents/` and `runs/` directories are
+**left untouched** — they contain user data.
 
 **Human output** (styled key/value block; each field colored green when
 `removed`, yellow when `skipped:*`, plain otherwise):
 ```
 aos uninstall
 wrapper  removed
-cron     removed
+tickLog  removed
+backend  removed
 config   removed
-kept     (none)
 ```
 
 **JSON output:**
 ```json
 {
   "wrapper": "removed",
-  "cron": "removed",
-  "config": "removed",
-  "kept": []
+  "tickLog": "removed",
+  "backend": "removed",
+  "config": "removed"
 }
 ```
 
-`kept` lists any `agents/`/`runs/` path that wasn't empty and was preserved.
+Each field is one of `removed | absent | skipped:<reason>`. When the config
+couldn't be loaded or `aos_home` was unset, `backend` reads
+`skipped:no-config`; backend-side errors are reported as
+`skipped:<sanitized-error>` (no spaces, max 60 chars).
 
 ---
 
@@ -592,7 +632,9 @@ Rules:
   directory at scan time (top-level → `"Agents"`; first-level subdir →
   subdir name).
 
-The shared types are mirrored on both sides: Go (`internal/scheduler/spec.go`
-— `AgentMeta`, `ScheduleSpec`) and TypeScript (`src/shared/scheduler.ts`).
-Keeping these in lockstep is part of the contract; tests on either side will
-catch drift in compilation behavior, not in the JSON shape itself.
+The shared types are mirrored on both sides: Go
+(`internal/scheduler/schedspec/spec.go` — `ScheduleSpec`, `Weekday`;
+`internal/scheduler/spec.go` — `AgentMeta`) and TypeScript
+(`src/shared/scheduler.ts`). Keeping these in lockstep is part of the
+contract; tests on either side will catch drift in compilation behavior, not
+in the JSON shape itself.

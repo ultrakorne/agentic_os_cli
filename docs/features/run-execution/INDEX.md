@@ -1,6 +1,6 @@
 # run-execution
 
-Manual run dispatch and run-record inspection. Covers `aos run` (fires a detached `wrapper.sh`, optionally blocks with `--wait`) and `aos runs` (list or show), plus the shared run/wait/spawn primitives in `internal/scheduler/`. Cron-driven runs and catch-ups are owned by the [scheduler](../scheduler/INDEX.md) feature, but everything reads the same `<aos_home>/runs/` directory the wrapper writes into.
+Manual run dispatch and run-record inspection. Covers `aos run` (fires a detached `wrapper.sh`, optionally blocks with `--wait`) and `aos runs` (list or show), plus the shared run/wait/spawn primitives in `internal/scheduler/`. Backend-driven scheduled runs are dispatched by launchd / systemd-user (see the [scheduler](../scheduler/INDEX.md) feature), but every run — scheduled or manual — reads and writes the same `<aos_home>/runs/` directory.
 
 ## Documents
 

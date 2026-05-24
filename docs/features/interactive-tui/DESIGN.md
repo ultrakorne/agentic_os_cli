@@ -51,7 +51,7 @@ Pressing `/` activates the focused list's internal filter (`bubbles/list`'s `Def
 
 1. User presses `Enter` on an agent row to open the details popup on the config tab.
 2. User navigates to the kind pills, switches to `daily`, fills `hour`/`minute`, toggles the days chips.
-3. `Ctrl+S` writes the sidecar atomically; an in-process refresh runs so the managed crontab reflects the change.
+3. `Ctrl+S` writes the sidecar atomically; an in-process refresh runs so the platform backend (launchd / systemd-user) entries reflect the change.
 4. A toast confirms; the popup stays open. `Esc` returns to the grid, where the agent's row now shows the new schedule summary.
 
 ### Inspect run history

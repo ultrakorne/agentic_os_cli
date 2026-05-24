@@ -1,6 +1,6 @@
 # lifecycle
 
-Install, relocate, and uninstall the aos runtime on a user's machine. Covers `aos init`, `aos home`, and `aos uninstall` — the verbs that own `~/.config/aos/config.toml`, the embedded `wrapper.sh`, the `agents/` and `runs/` subdirectories, and (in the uninstall path) the managed crontab block.
+Install, relocate, and uninstall the aos runtime on a user's machine. Covers `aos init`, `aos home`, and `aos uninstall` — the verbs that own `~/.config/aos/config.toml`, the embedded `wrapper.sh`, the `agents/` and `runs/` subdirectories, and (in the uninstall path) the platform backend's managed namespace (LaunchAgents on macOS / systemd-user units on Linux).
 
 ## Documents
 
