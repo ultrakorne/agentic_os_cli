@@ -94,9 +94,15 @@ func (b *SystemdBackend) renderAgent(j AgentJob) (service, timer systemdUnit, er
 	service = systemdUnit{
 		sections: []systemdSection{
 			{name: "Unit", values: []systemdKV{{"Description", "aos agent " + j.AgentID}}},
+			// wrapper.sh takes no positional args; every value flows in via
+			// Environment= so we don't have to worry about systemd's ExecStart
+			// quoting rules vs special chars in paths.
 			{name: "Service", values: []systemdKV{
 				{"Type", "oneshot"},
-				{"ExecStart", fmt.Sprintf("%s %s %s %s ''", systemdShellQuote(wrapper), systemdShellQuote(b.aosHome), systemdShellQuote(j.AgentID), systemdShellQuote(j.ScriptPath))},
+				{"ExecStart", systemdShellQuote(wrapper)},
+				{"Environment", systemdEnvQuote("AGENTIC_OS_DATA_DIR", b.aosHome)},
+				{"Environment", systemdEnvQuote("AGENTIC_OS_AGENT_ID", j.AgentID)},
+				{"Environment", systemdEnvQuote("AGENTIC_OS_AGENT_SCRIPT", j.ScriptPath)},
 				{"Environment", "AGENTIC_OS_TRIGGER=schedule"},
 				{"StandardOutput", "null"},
 				{"StandardError", "null"},
@@ -220,9 +226,24 @@ func systemdWeekdayOrd(d schedspec.Weekday) int {
 	return 99
 }
 
-// systemdShellQuote single-quotes a path for systemd's ExecStart parser.
+// systemdShellQuote double-quotes a string for systemd's ExecStart parser.
+// Backslash escapes ARE processed inside double quotes per systemd.exec(5),
+// so escape `\` and `"`. Single quotes pass through unchanged.
 func systemdShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`
+}
+
+// systemdEnvQuote wraps a single KEY=value pair in double quotes with
+// backslash escapes so an embedded space, tab, `$`, `"`, or `\` doesn't
+// confuse systemd's Environment= parser. The whole KEY=value goes inside one
+// pair of quotes (not just the value) because Environment= is
+// space-separated and an unbalanced quote on either side breaks the parse.
+func systemdEnvQuote(key, value string) string {
+	v := strings.ReplaceAll(value, `\`, `\\`)
+	v = strings.ReplaceAll(v, `"`, `\"`)
+	return `"` + key + `=` + v + `"`
 }
 
 // marshalUnit renders a systemdUnit to canonical INI bytes.

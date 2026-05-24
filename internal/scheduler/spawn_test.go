@@ -21,12 +21,12 @@ func TestNewRunID_isUnique(t *testing.T) {
 	}
 }
 
-// TestSpawnWrapperDetached_passesArgsAndTriggerEnv runs a fake wrapper that
-// records its argv and AGENTIC_OS_TRIGGER to a log file, then asserts both.
-// Locks in the wrapper argv contract: <aos_home> <agent-id> <script>
-// <run-id>. Also pins the per-trigger env wiring callers depend on (manual
-// runs distinguishable from schedule runs).
-func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
+// TestSpawnWrapperDetached_passesEnvContract runs a fake wrapper that
+// records the run-context env vars to a log file, then asserts the contract.
+// Locks in the wrapper env contract: AGENTIC_OS_DATA_DIR / AGENT_ID /
+// AGENT_SCRIPT / RUN_ID / TRIGGER. Also pins the per-trigger wiring callers
+// depend on (manual runs distinguishable from schedule runs).
+func TestSpawnWrapperDetached_passesEnvContract(t *testing.T) {
 	cases := []struct {
 		name    string
 		trigger string
@@ -41,10 +41,10 @@ func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
 			wrapper := filepath.Join(tmp, "wrapper.sh")
 			log := filepath.Join(tmp, "wrapper.log")
 			body := "#!/usr/bin/env bash\n" +
-				"echo \"$1\" >> \"" + log + "\"\n" +
-				"echo \"$2\" >> \"" + log + "\"\n" +
-				"echo \"$3\" >> \"" + log + "\"\n" +
-				"echo \"$4\" >> \"" + log + "\"\n" +
+				"echo \"data_dir=$AGENTIC_OS_DATA_DIR\" >> \"" + log + "\"\n" +
+				"echo \"agent_id=$AGENTIC_OS_AGENT_ID\" >> \"" + log + "\"\n" +
+				"echo \"script=$AGENTIC_OS_AGENT_SCRIPT\" >> \"" + log + "\"\n" +
+				"echo \"run_id=$AGENTIC_OS_RUN_ID\" >> \"" + log + "\"\n" +
 				"echo \"trigger=$AGENTIC_OS_TRIGGER\" >> \"" + log + "\"\n"
 			if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
 				t.Fatalf("write wrapper: %v", err)
@@ -97,7 +97,13 @@ func TestSpawnWrapperDetached_passesArgsAndTriggerEnv(t *testing.T) {
 			if expectedTrigger == "" {
 				expectedTrigger = "schedule"
 			}
-			want := []string{aosHome, "planner", script, "run-xyz", "trigger=" + expectedTrigger}
+			want := []string{
+				"data_dir=" + aosHome,
+				"agent_id=planner",
+				"script=" + script,
+				"run_id=run-xyz",
+				"trigger=" + expectedTrigger,
+			}
 			for i, w := range want {
 				if lines[i] != w {
 					t.Errorf("line %d = %q, want %q", i, lines[i], w)

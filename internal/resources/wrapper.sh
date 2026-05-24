@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # agentic_os run wrapper
-# usage: wrapper.sh <data-dir> <agent-id> <agent-script> [<run-id>]
+# usage: wrapper.sh   (no positional args; all input comes from env vars)
 #
-# captures start/end/exit/output of <agent-script> and writes:
-#   <data-dir>/runs/<run-id>.json   meta record
-#   <data-dir>/runs/<run-id>.out    captured stdout+stderr
+# required env:
+#   AGENTIC_OS_DATA_DIR        aos_home (runs/ lives here)
+#   AGENTIC_OS_AGENT_ID        agent identifier (filename stem)
+#   AGENTIC_OS_AGENT_SCRIPT    absolute path to the agent script
+# optional env:
+#   AGENTIC_OS_RUN_ID          caller-provided run id; otherwise wrapper mints one
+#   AGENTIC_OS_TRIGGER         schedule | manual; defaults to schedule
 #
-# trigger defaults to 'schedule'; manual runs from the UI set
-# AGENTIC_OS_TRIGGER=manual in env.
+# captures start/end/exit/output of the agent script and writes:
+#   $AGENTIC_OS_DATA_DIR/runs/<run-id>.json   meta record
+#   $AGENTIC_OS_DATA_DIR/runs/<run-id>.out    captured stdout+stderr
 #
 # TIMESTAMP FORMAT: iso_now below MUST emit the same shape the Go side
 # normalizes on — millisecond-precision UTC, e.g. "2026-05-16T13:09:37.072Z".
@@ -24,17 +29,14 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 127
 fi
 
-if [ $# -lt 3 ]; then
-  echo "wrapper.sh: expected 3 args, got $#" >&2
+DATA_DIR="${AGENTIC_OS_DATA_DIR:-}"
+AGENT_ID="${AGENTIC_OS_AGENT_ID:-}"
+SCRIPT="${AGENTIC_OS_AGENT_SCRIPT:-}"
+if [ -z "$DATA_DIR" ] || [ -z "$AGENT_ID" ] || [ -z "$SCRIPT" ]; then
+  echo "wrapper.sh: missing required env (AGENTIC_OS_DATA_DIR, AGENTIC_OS_AGENT_ID, AGENTIC_OS_AGENT_SCRIPT)" >&2
   exit 64
 fi
-
-DATA_DIR="$1"
-AGENT_ID="$2"
-SCRIPT="$3"
-# optional 4th arg: caller-provided run id (manual runs from the engine pass
-# this so the spawn-time stub matches the on-disk record).
-EXPLICIT_RUN_ID="${4:-}"
+EXPLICIT_RUN_ID="${AGENTIC_OS_RUN_ID:-}"
 TRIGGER="${AGENTIC_OS_TRIGGER:-schedule}"
 
 # cron's PATH is minimal; cover the common per-user bin dirs so installed

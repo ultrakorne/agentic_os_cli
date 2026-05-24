@@ -106,14 +106,19 @@ func (b *LaunchdBackend) renderAgent(j AgentJob) (launchdJob, error) {
 	wrapper := filepath.Join(b.aosHome, "wrapper.sh")
 	return launchdJob{
 		Label: LaunchdAgentLabel(j.AgentID),
-		// Empty 4th arg → wrapper.sh mints its own run-id (launchd has no
-		// cron-style placeholder).
-		ProgramArguments:      []string{wrapper, b.aosHome, j.AgentID, j.ScriptPath, ""},
+		// wrapper.sh takes no positional args; every value flows in via env.
+		// Quoting concerns (special chars in paths) collapse to "set env var".
+		ProgramArguments:      []string{wrapper},
 		StartCalendarInterval: intervals,
 		RunAtLoad:             false,
 		StandardOutPath:       "/dev/null",
 		StandardErrorPath:     "/dev/null",
-		EnvironmentVariables:  map[string]string{"AGENTIC_OS_TRIGGER": "schedule"},
+		EnvironmentVariables: map[string]string{
+			"AGENTIC_OS_DATA_DIR":     b.aosHome,
+			"AGENTIC_OS_AGENT_ID":     j.AgentID,
+			"AGENTIC_OS_AGENT_SCRIPT": j.ScriptPath,
+			"AGENTIC_OS_TRIGGER":      "schedule",
+		},
 	}, nil
 }
 

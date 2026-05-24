@@ -52,8 +52,14 @@ func TestWrapperShFormat_matchesStore(t *testing.T) {
 
 	store := NewFileRunStore(aosHome)
 	runID := store.NewID()
-	cmd := exec.Command(wrapperPath, aosHome, "ping", script, runID)
-	cmd.Env = append(os.Environ(), "AGENTIC_OS_TRIGGER=manual")
+	cmd := exec.Command(wrapperPath)
+	cmd.Env = append(os.Environ(),
+		"AGENTIC_OS_DATA_DIR="+aosHome,
+		"AGENTIC_OS_AGENT_ID=ping",
+		"AGENTIC_OS_AGENT_SCRIPT="+script,
+		"AGENTIC_OS_RUN_ID="+runID,
+		"AGENTIC_OS_TRIGGER=manual",
+	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("wrapper invocation failed: %v\noutput: %s", err, out)
 	}
