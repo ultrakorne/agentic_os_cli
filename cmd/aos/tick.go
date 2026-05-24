@@ -13,8 +13,20 @@ import (
 
 var tickCmd = &cobra.Command{
 	Use:   "tick",
-	Short: "Run one scheduler tick: scan, detect missed runs, log a summary",
-	Args:  cobra.NoArgs,
+	Short: "Run one scheduler tick: record misses, sweep stale runs, report backend drift",
+	Long: `Invoked by the platform backend's tick entry on its configured cadence.
+Each tick does, in order:
+
+  1. Detect missed slots and persist them as runs/miss-*.json (the
+     platform's native make-up-on-wake handles re-firing; aos does not
+     dispatch a follow-up).
+  2. Sweep stale 'running' records: anything still in flight after
+     more than an hour is rewritten as error/no completion record.
+  3. Probe backend drift via Backend.State(spec).
+  4. Append a summary line to <aos_home>/tick.log.
+
+Safe to invoke manually if you want a fresh snapshot.`,
+	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		out, err := runTick()
 		if err != nil {
