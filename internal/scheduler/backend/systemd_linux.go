@@ -298,6 +298,11 @@ func parseUnit(data []byte) systemdUnit {
 
 // Sync reconciles the systemd-user unit directory with spec.
 func (b *SystemdBackend) Sync(spec Spec) (SyncResult, error) {
+	release, err := acquireSyncLock(b.aosHome)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	defer release()
 	if err := os.MkdirAll(b.dir, 0o755); err != nil {
 		return SyncResult{}, fmt.Errorf("mkdir %s: %w", b.dir, err)
 	}
@@ -328,25 +333,38 @@ func (b *SystemdBackend) Sync(spec Spec) (SyncResult, error) {
 
 	res := SyncResult{Failed: failed}
 	changed := false
+	// succeeded tracks bases whose .service AND .timer landed on disk this
+	// Sync; only those bases proceed to Enable. Without this gate, a failed
+	// .service write earlier in the loop produces a second cascade
+	// "unit file does not exist" error when Enable runs over the whole
+	// expected map.
+	succeeded := map[string]bool{}
 
 	for base, want := range expected {
 		svcPath := filepath.Join(b.dir, base+".service")
 		tmrPath := filepath.Join(b.dir, base+".timer")
 		changedHere := false
+		failedHere := false
 		if !unitsEqualOnDisk(svcPath, want.service) {
 			if err := systemdAtomicWrite(svcPath, marshalUnit(want.service)); err != nil {
 				res.Failed = append(res.Failed, FailedJob{AgentID: systemdBaseToAgentID(base), Reason: err.Error()})
-				continue
+				failedHere = true
+			} else {
+				changedHere = true
 			}
-			changedHere = true
 		}
-		if !unitsEqualOnDisk(tmrPath, want.timer) {
+		if !failedHere && !unitsEqualOnDisk(tmrPath, want.timer) {
 			if err := systemdAtomicWrite(tmrPath, marshalUnit(want.timer)); err != nil {
 				res.Failed = append(res.Failed, FailedJob{AgentID: systemdBaseToAgentID(base), Reason: err.Error()})
-				continue
+				failedHere = true
+			} else {
+				changedHere = true
 			}
-			changedHere = true
 		}
+		if failedHere {
+			continue
+		}
+		succeeded[base] = true
 		if changedHere {
 			res.Wrote++
 			changed = true
@@ -356,43 +374,43 @@ func (b *SystemdBackend) Sync(spec Spec) (SyncResult, error) {
 	}
 
 	// Orphans: anything in our namespace not in expected.
-	type removal struct {
-		base string
-	}
-	var removals []removal
+	var removalBases []string
 	for base := range existing {
 		if _, ok := expected[base]; ok {
 			continue
 		}
-		removals = append(removals, removal{base: base})
+		removalBases = append(removalBases, base)
 	}
 
-	if changed || len(removals) > 0 {
+	if changed || len(removalBases) > 0 {
 		if err := b.loader.DaemonReload(); err != nil {
 			return res, fmt.Errorf("daemon-reload: %w", err)
 		}
 	}
 
-	for _, r := range removals {
-		_ = b.loader.Disable(r.base + ".timer")
+	for _, base := range removalBases {
+		_ = b.loader.Disable(base + ".timer")
+		removedClean := true
 		for _, suf := range []string{".service", ".timer"} {
-			p := filepath.Join(b.dir, r.base+suf)
+			p := filepath.Join(b.dir, base+suf)
 			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-				res.Failed = append(res.Failed, FailedJob{AgentID: systemdBaseToAgentID(r.base), Reason: err.Error()})
-				continue
+				res.Failed = append(res.Failed, FailedJob{AgentID: systemdBaseToAgentID(base), Reason: err.Error()})
+				removedClean = false
 			}
 		}
-		res.Removed++
+		if removedClean {
+			res.Removed++
+		}
 	}
 
-	for base := range expected {
+	for base := range succeeded {
 		// enable --now is idempotent — safe to call on every Sync.
 		if err := b.loader.Enable(base + ".timer"); err != nil {
 			res.Failed = append(res.Failed, FailedJob{AgentID: systemdBaseToAgentID(base), Reason: fmt.Sprintf("enable: %v", err)})
 		}
 	}
 
-	if len(removals) > 0 {
+	if len(removalBases) > 0 {
 		_ = b.loader.DaemonReload()
 	}
 

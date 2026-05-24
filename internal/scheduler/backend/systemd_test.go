@@ -49,6 +49,46 @@ func newSystemdBackend(t *testing.T) (*SystemdBackend, *fakeSystemdLoader, strin
 	return b, fake, aosHome
 }
 
+// TestSystemdSync_writeFailureDoesNotEnable ensures a failed unit-file write
+// does NOT cascade into a second "enable: unit file does not exist" failure
+// for the same agent — Enable iterates only the succeeded set.
+func TestSystemdSync_writeFailureDoesNotEnable(t *testing.T) {
+	b, fake, aosHome := newSystemdBackend(t)
+	// Force a write failure by making the unit dir read-only AFTER mkdir.
+	if _, err := b.Sync(Spec{}); err != nil {
+		t.Fatalf("warm-up Sync: %v", err)
+	}
+	// Pre-Sync: dir exists, owned by us. Now chmod to drop write.
+	dir := filepath.Join(filepath.Dir(aosHome), "systemd-user")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Skipf("cannot chmod dir to read-only (running as root?): %v", err)
+	}
+	defer os.Chmod(dir, 0o755)
+
+	spec := Spec{
+		Agents: []AgentJob{{
+			AgentID:    "planner",
+			ScriptPath: filepath.Join(aosHome, "planner.sh"),
+			Schedule:   schedspec.ScheduleSpec{Kind: "hourly", EveryHours: 1, Minute: 0},
+		}},
+	}
+	res, err := b.Sync(spec)
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(res.Failed) != 1 {
+		t.Fatalf("Failed = %d, want 1 (write failed)", len(res.Failed))
+	}
+	if res.Failed[0].AgentID != "planner" {
+		t.Errorf("Failed[0].AgentID = %q, want planner", res.Failed[0].AgentID)
+	}
+	for _, enabled := range fake.enabled {
+		if strings.Contains(enabled, "planner") {
+			t.Errorf("Enable was called for write-failed agent: %q", enabled)
+		}
+	}
+}
+
 // TestSystemdState_driftWhenTimerInactive covers the silent-dead case: unit
 // files on disk match the spec, but the timer was disabled out-of-band.
 // State must surface this as drift so `aos tick` doesn't claim managed.

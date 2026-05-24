@@ -224,6 +224,11 @@ func parseLaunchdPlist(data []byte) (launchdJob, error) {
 
 // Sync reconciles the LaunchAgents directory with spec.
 func (b *LaunchdBackend) Sync(spec Spec) (SyncResult, error) {
+	release, err := acquireSyncLock(b.aosHome)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	defer release()
 	if err := os.MkdirAll(b.dir, 0o755); err != nil {
 		return SyncResult{}, fmt.Errorf("mkdir %s: %w", b.dir, err)
 	}
